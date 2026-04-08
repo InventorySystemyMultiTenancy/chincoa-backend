@@ -3,6 +3,39 @@ import { AppError } from './appError.js';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const DEFAULT_BUSINESS_TIMEZONE = 'America/Sao_Paulo';
+
+function getNowByBusinessTimezone() {
+  const timezone = process.env.BUSINESS_TIMEZONE || DEFAULT_BUSINESS_TIMEZONE;
+
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+
+    const parts = formatter.formatToParts(new Date());
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+    return {
+      currentDate: `${values.year}-${values.month}-${values.day}`,
+      currentMinutes: Number(values.hour) * 60 + Number(values.minute),
+      timezone,
+    };
+  } catch (_error) {
+    const now = new Date();
+    return {
+      currentDate: now.toISOString().slice(0, 10),
+      currentMinutes: now.getHours() * 60 + now.getMinutes(),
+      timezone: 'server-localtime',
+    };
+  }
+}
 
 export function requireFields(payload, fields) {
   const missing = fields.filter((field) => {
@@ -60,15 +93,13 @@ export function validateAppointmentStatus(status) {
 }
 
 export function ensureFutureSlot(dateString, timeString) {
-  const now = new Date();
-  const currentDate = now.toISOString().slice(0, 10);
+  const { currentDate, currentMinutes } = getNowByBusinessTimezone();
 
   if (dateString !== currentDate) {
     return;
   }
 
   const [hours, minutes] = timeString.split(':').map(Number);
-  const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const requestedMinutes = hours * 60 + minutes;
 
   if (requestedMinutes <= currentMinutes) {
