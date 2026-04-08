@@ -41,6 +41,12 @@ export function validateTime(time) {
   }
 }
 
+export function validateWeekday(weekday) {
+  if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+    throw new AppError('weekday invalido. Use intervalo 0-6 (0=domingo)', 400, 'VALIDATION_ERROR');
+  }
+}
+
 export function validateRole(role) {
   if (!['admin', 'client'].includes(role)) {
     throw new AppError('Role invalida', 400, 'VALIDATION_ERROR');

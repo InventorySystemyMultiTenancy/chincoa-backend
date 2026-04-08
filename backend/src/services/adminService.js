@@ -1,10 +1,7 @@
 import { query } from '../db/pool.js';
 import { AppError } from '../utils/appError.js';
-import { ensureCurrentWeekSchedule } from './weeklyScheduleService.js';
 
 export async function listAppointmentsByDate(date) {
-  await ensureCurrentWeekSchedule();
-
   const params = [];
   let whereClause = '';
 
@@ -39,8 +36,6 @@ export async function listAppointmentsByDate(date) {
 }
 
 export async function updateAppointmentStatus({ appointmentId, status }) {
-  await ensureCurrentWeekSchedule();
-
   const current = await query(
     `
       SELECT id, user_id, appointment_date, appointment_time, status, price, created_at, updated_at
@@ -81,15 +76,9 @@ export async function updateAppointmentStatus({ appointmentId, status }) {
 }
 
 export async function deleteAppointmentAsAdmin(appointmentId) {
-  await ensureCurrentWeekSchedule();
-
   const result = await query(
     `
-      UPDATE appointments
-      SET
-        user_id = NULL,
-        status = 'disponivel',
-        updated_at = NOW()
+      DELETE FROM appointments
       WHERE id = $1
       RETURNING id
     `,

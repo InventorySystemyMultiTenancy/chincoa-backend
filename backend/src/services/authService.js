@@ -46,14 +46,14 @@ export async function loginUser({ email, password }) {
   );
 
   if (result.rowCount === 0) {
-    throw new AppError('Credenciais invalidas', 401, 'INVALID_CREDENTIALS');
+    throw new AppError('Credenciais invalidas', 401, 'AUTH_INVALID_CREDENTIALS');
   }
 
   const user = result.rows[0];
   const isMatch = await bcrypt.compare(password, user.password_hash);
 
   if (!isMatch) {
-    throw new AppError('Credenciais invalidas', 401, 'INVALID_CREDENTIALS');
+    throw new AppError('Credenciais invalidas', 401, 'AUTH_INVALID_CREDENTIALS');
   }
 
   return {

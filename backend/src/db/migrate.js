@@ -7,10 +7,20 @@ import { query, pool } from './pool.js';
 async function runMigration() {
   const currentFile = fileURLToPath(import.meta.url);
   const currentDir = path.dirname(currentFile);
-  const sqlPath = path.resolve(currentDir, '../../sql/001_init.sql');
+  const sqlDir = path.resolve(currentDir, '../../sql');
+  const entries = await fs.readdir(sqlDir, { withFileTypes: true });
 
-  const sql = await fs.readFile(sqlPath, 'utf-8');
-  await query(sql);
+  const migrationFiles = entries
+    .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.sql'))
+    .map((entry) => entry.name)
+    .sort((a, b) => a.localeCompare(b));
+
+  for (const fileName of migrationFiles) {
+    const sqlPath = path.join(sqlDir, fileName);
+    const sql = await fs.readFile(sqlPath, 'utf-8');
+    await query(sql);
+    console.log(`Migracao aplicada: ${fileName}`);
+  }
 
   console.log('Migracao executada com sucesso.');
 }

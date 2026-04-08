@@ -1,21 +1,6 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 SET search_path TO public;
 
-CREATE TABLE IF NOT EXISTS business_hours (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),
-  slot_time TIME NOT NULL,
-  enabled BOOLEAN NOT NULL DEFAULT true,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (weekday, slot_time)
-);
-
-CREATE TABLE IF NOT EXISTS system_settings (
-  setting_key TEXT PRIMARY KEY,
-  setting_value TEXT NOT NULL,
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   full_name TEXT NOT NULL,
@@ -24,6 +9,23 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'client' CHECK (role IN ('admin', 'client')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS business_days (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  date DATE NOT NULL UNIQUE,
+  is_enabled BOOLEAN NOT NULL DEFAULT true,
+  reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS business_hours (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+  slot_time TIME NOT NULL,
+  is_enabled BOOLEAN NOT NULL DEFAULT true,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (weekday, slot_time)
 );
 
 CREATE TABLE IF NOT EXISTS appointments (
@@ -36,6 +38,25 @@ CREATE TABLE IF NOT EXISTS appointments (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE business_hours
+  ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN NOT NULL DEFAULT true;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'business_hours'
+      AND column_name = 'enabled'
+  ) THEN
+    EXECUTE 'UPDATE business_hours SET is_enabled = enabled';
+  END IF;
+END $$;
+
+ALTER TABLE business_hours
+  DROP COLUMN IF EXISTS enabled;
+
 ALTER TABLE appointments
   ALTER COLUMN user_id DROP NOT NULL;
 
@@ -47,13 +68,10 @@ ALTER TABLE appointments
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL;
 
 ALTER TABLE appointments
-  ADD COLUMN IF NOT EXISTS week_start_date DATE;
-
-ALTER TABLE appointments
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
 ALTER TABLE appointments
-  ALTER COLUMN status SET DEFAULT 'disponivel';
+  ALTER COLUMN status SET DEFAULT 'agendado';
 
 DO $$
 BEGIN
@@ -71,26 +89,18 @@ BEGIN
   END IF;
 END $$;
 
-UPDATE appointments
-SET week_start_date = (
-  appointment_date
-  - ((EXTRACT(ISODOW FROM appointment_date)::INT - 1) * INTERVAL '1 day')
-)::DATE
-WHERE week_start_date IS NULL;
-
-ALTER TABLE appointments
-  ALTER COLUMN week_start_date SET NOT NULL;
-
+DROP INDEX IF EXISTS unique_appointment_slot;
 DROP INDEX IF EXISTS unique_active_appointment_slot;
 
-CREATE UNIQUE INDEX IF NOT EXISTS unique_appointment_slot
-  ON appointments (appointment_date, appointment_time);
-
-CREATE INDEX IF NOT EXISTS idx_appointments_week_start
-  ON appointments (week_start_date);
+CREATE UNIQUE INDEX IF NOT EXISTS unique_appointment_reserved_slot
+  ON appointments (appointment_date, appointment_time)
+  WHERE status IN ('agendado', 'pago');
 
 CREATE INDEX IF NOT EXISTS idx_appointments_status
   ON appointments (status);
+
+CREATE INDEX IF NOT EXISTS idx_business_days_date
+  ON business_days (date);
 
 INSERT INTO business_hours (weekday, slot_time)
 SELECT weekday, slot_time
