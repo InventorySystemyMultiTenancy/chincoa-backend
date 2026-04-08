@@ -1,0 +1,9 @@
+{
+  "name": "chincoa-backend-deploy",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "npm install --prefix backend",
+    "start": "npm start --prefix backend"
+  }
+}
