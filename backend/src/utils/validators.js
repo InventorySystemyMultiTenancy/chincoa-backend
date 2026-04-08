@@ -5,7 +5,7 @@ const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const DEFAULT_BUSINESS_TIMEZONE = 'America/Sao_Paulo';
 
-function getNowByBusinessTimezone() {
+export function getNowByBusinessTimezone() {
   const timezone = process.env.BUSINESS_TIMEZONE || DEFAULT_BUSINESS_TIMEZONE;
 
   try {
@@ -35,6 +35,29 @@ function getNowByBusinessTimezone() {
       timezone: 'server-localtime',
     };
   }
+}
+
+export function isPastSlotByBusinessTimezone(dateString, timeString) {
+  const { currentDate, currentMinutes, timezone } = getNowByBusinessTimezone();
+
+  if (dateString !== currentDate) {
+    return {
+      isPast: false,
+      currentDate,
+      currentMinutes,
+      timezone,
+    };
+  }
+
+  const [hours, minutes] = timeString.split(':').map(Number);
+  const requestedMinutes = hours * 60 + minutes;
+
+  return {
+    isPast: requestedMinutes <= currentMinutes,
+    currentDate,
+    currentMinutes,
+    timezone,
+  };
 }
 
 export function requireFields(payload, fields) {
@@ -93,16 +116,9 @@ export function validateAppointmentStatus(status) {
 }
 
 export function ensureFutureSlot(dateString, timeString) {
-  const { currentDate, currentMinutes } = getNowByBusinessTimezone();
+  const context = isPastSlotByBusinessTimezone(dateString, timeString);
 
-  if (dateString !== currentDate) {
-    return;
-  }
-
-  const [hours, minutes] = timeString.split(':').map(Number);
-  const requestedMinutes = hours * 60 + minutes;
-
-  if (requestedMinutes <= currentMinutes) {
+  if (context.isPast) {
     throw new AppError('Nao e permitido agendar horario passado no dia atual', 400, 'PAST_APPOINTMENT');
   }
 }

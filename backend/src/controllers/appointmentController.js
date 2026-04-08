@@ -6,7 +6,6 @@ import {
 } from '../services/appointmentService.js';
 import { sendSuccess } from '../utils/apiResponse.js';
 import {
-  ensureFutureSlot,
   requireFields,
   validateDate,
   validateTime,
@@ -28,8 +27,8 @@ export async function getSlotsByDate(req, res, next) {
     const date = String(req.query.date).trim();
     validateDate(date);
 
-    const slots = await listSlotsByDate(date);
-    return sendSuccess(res, 200, { slots });
+    const { slots, meta } = await listSlotsByDate(date);
+    return sendSuccess(res, 200, { slots, meta });
   } catch (error) {
     return next(error);
   }
@@ -37,14 +36,24 @@ export async function getSlotsByDate(req, res, next) {
 
 export async function createMyAppointment(req, res, next) {
   try {
-    requireFields(req.body, ['appointment_date', 'appointment_time']);
+    const appointmentDateRaw = req.body.appointment_date ?? req.body.appointmentDate;
+    const appointmentTimeRaw = req.body.appointment_time ?? req.body.appointmentTime;
 
-    const appointmentDate = String(req.body.appointment_date).trim();
-    const appointmentTime = String(req.body.appointment_time).trim();
+    if (!appointmentDateRaw || !appointmentTimeRaw) {
+      requireFields(
+        {
+          appointment_date: appointmentDateRaw,
+          appointment_time: appointmentTimeRaw,
+        },
+        ['appointment_date', 'appointment_time'],
+      );
+    }
+
+    const appointmentDate = String(appointmentDateRaw).trim();
+    const appointmentTime = String(appointmentTimeRaw).trim();
 
     validateDate(appointmentDate);
     validateTime(appointmentTime);
-    ensureFutureSlot(appointmentDate, appointmentTime);
 
     const appointment = await createAppointment({
       userId: req.user.id,
