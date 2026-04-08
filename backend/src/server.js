@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import app, { allowedOrigins } from './app.js';
 import { seedInitialAdmin } from './db/seedAdmin.js';
+import { startWeeklyScheduleMaintenance } from './services/weeklyScheduleService.js';
 
 dotenv.config();
 
@@ -8,6 +9,7 @@ const port = Number(process.env.PORT || 3001);
 
 async function bootstrap() {
   await seedInitialAdmin();
+  await startWeeklyScheduleMaintenance();
 
   app.listen(port, () => {
     console.log(`Backend running at http://localhost:${port}`);

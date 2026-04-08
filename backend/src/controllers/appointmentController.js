@@ -1,6 +1,7 @@
 import {
   createAppointment,
   deleteAppointmentByOwnerOrAdmin,
+  listSlotsByDate,
   listMyAppointments,
 } from '../services/appointmentService.js';
 import { sendSuccess } from '../utils/apiResponse.js';
@@ -15,6 +16,20 @@ export async function getMyAppointments(req, res, next) {
   try {
     const appointments = await listMyAppointments(req.user.id);
     return sendSuccess(res, 200, { appointments });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getSlotsByDate(req, res, next) {
+  try {
+    requireFields(req.query, ['date']);
+
+    const date = String(req.query.date).trim();
+    validateDate(date);
+
+    const slots = await listSlotsByDate(date);
+    return sendSuccess(res, 200, { slots });
   } catch (error) {
     return next(error);
   }

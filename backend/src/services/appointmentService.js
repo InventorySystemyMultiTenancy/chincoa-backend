@@ -1,14 +1,15 @@
 import { query } from '../db/pool.js';
 import { AppError } from '../utils/appError.js';
-
-const DEFAULT_PRICE = 45;
+import { ensureCurrentWeekSchedule, reserveWeeklySlot } from './weeklyScheduleService.js';
 
 export async function listMyAppointments(userId) {
+  await ensureCurrentWeekSchedule();
+
   const result = await query(
     `
-      SELECT id, user_id, appointment_date, appointment_time, status, price, created_at
+      SELECT id, user_id, appointment_date, appointment_time, status, price, created_at, updated_at
       FROM appointments
-      WHERE user_id = $1
+      WHERE user_id = $1 AND status IN ('agendado', 'pago')
       ORDER BY appointment_date DESC, appointment_time DESC
     `,
     [userId],
@@ -17,31 +18,40 @@ export async function listMyAppointments(userId) {
   return result.rows;
 }
 
+export async function listSlotsByDate(appointmentDate) {
+  await ensureCurrentWeekSchedule();
+
+  const result = await query(
+    `
+      SELECT
+        id,
+        user_id,
+        appointment_date,
+        appointment_time,
+        status,
+        price,
+        created_at,
+        updated_at
+      FROM appointments
+      WHERE appointment_date = $1
+      ORDER BY appointment_time ASC
+    `,
+    [appointmentDate],
+  );
+
+  return result.rows;
+}
+
 export async function createAppointment({ userId, appointmentDate, appointmentTime }) {
-  try {
-    const result = await query(
-      `
-        INSERT INTO appointments (user_id, appointment_date, appointment_time, status, price)
-        VALUES ($1, $2, $3, 'agendado', $4)
-        RETURNING id, user_id, appointment_date, appointment_time, status, price, created_at
-      `,
-      [userId, appointmentDate, appointmentTime, DEFAULT_PRICE],
-    );
-
-    return result.rows[0];
-  } catch (error) {
-    if (error.code === '23505') {
-      throw new AppError('Horario indisponivel para a data selecionada', 409, 'SLOT_CONFLICT');
-    }
-
-    throw error;
-  }
+  return reserveWeeklySlot({ userId, appointmentDate, appointmentTime });
 }
 
 export async function deleteAppointmentByOwnerOrAdmin({ appointmentId, user }) {
+  await ensureCurrentWeekSchedule();
+
   const result = await query(
     `
-      SELECT id, user_id
+      SELECT id, user_id, status
       FROM appointments
       WHERE id = $1
     `,
@@ -59,9 +69,17 @@ export async function deleteAppointmentByOwnerOrAdmin({ appointmentId, user }) {
     throw new AppError('Sem permissao para cancelar este agendamento', 403, 'FORBIDDEN');
   }
 
+  if (user.role !== 'admin' && appointment.status === 'pago') {
+    throw new AppError('Nao e permitido cancelar agendamento pago', 400, 'PAID_APPOINTMENT_CANNOT_CANCEL');
+  }
+
   await query(
     `
-      DELETE FROM appointments
+      UPDATE appointments
+      SET
+        user_id = NULL,
+        status = 'disponivel',
+        updated_at = NOW()
       WHERE id = $1
     `,
     [appointmentId],
