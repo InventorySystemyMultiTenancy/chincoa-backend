@@ -8,7 +8,7 @@ import healthRoutes from './routes/healthRoutes.js';
 import { errorHandler, notFoundHandler } from './middlewares/errorMiddleware.js';
 
 const app = express();
-const defaultOrigins = ['http://localhost:5173', 'http://localhost:8080'];
+const defaultOrigins = ['http://localhost:5173', 'http://localhost:8080', 'https://chincoacortes.selfmachine.com.br/'];
 
 function getAllowedOrigins() {
   const fromCorsOrigins = (process.env.CORS_ORIGINS || '')
