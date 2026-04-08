@@ -70,6 +70,20 @@ ALTER TABLE appointments
 ALTER TABLE appointments
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'appointments'
+      AND column_name = 'week_start_date'
+  ) THEN
+    EXECUTE 'ALTER TABLE appointments ALTER COLUMN week_start_date DROP NOT NULL';
+    EXECUTE 'ALTER TABLE appointments DROP COLUMN week_start_date';
+  END IF;
+END $$;
+
 ALTER TABLE appointments
   ALTER COLUMN status SET DEFAULT 'agendado';
 
