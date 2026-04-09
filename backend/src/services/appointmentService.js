@@ -130,7 +130,7 @@ function maybeDebugLog(event, payload) {
   console.log(`[appointments:${event}]`, JSON.stringify(payload));
 }
 
-async function assertSlotEnabledForBookingWithClient(client, dateString, timeString) {
+async function assertSlotEnabledForBookingWithClient(client, dateString, timeString, userId) {
   const normalizedTime = normalizeTime(timeString);
 
   const dayOverrideResult = await client.query(
@@ -201,10 +201,21 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
   });
 
   if (decision.status === 'disponivel') {
-    return;
+    return { shouldInsert: true };
   }
 
   if (decision.code === 'SLOT_ALREADY_BOOKED') {
+    if (existing && existing.user_id === userId) {
+      return {
+        shouldInsert: false,
+        existingAppointment: {
+          ...existing,
+          appointment_time: normalizeTime(existing.appointment_time),
+          price: Number(existing.price),
+        },
+      };
+    }
+
     throw new AppError('Horario ja reservado', 409, 'SLOT_ALREADY_BOOKED', {
       date: dateString,
       time: normalizedTime,
@@ -355,7 +366,29 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
 
   try {
     await client.query('BEGIN');
-    await assertSlotEnabledForBookingWithClient(client, appointmentDate, normalizedTime);
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      `appointment_slot:${appointmentDate}:${normalizedTime}`,
+    ]);
+
+    const bookingValidation = await assertSlotEnabledForBookingWithClient(
+      client,
+      appointmentDate,
+      normalizedTime,
+      userId,
+    );
+
+    if (!bookingValidation.shouldInsert) {
+      await client.query('COMMIT');
+
+      maybeDebugLog('post-idempotent-hit', {
+        userId,
+        date: appointmentDate,
+        time: normalizedTime,
+        appointmentId: bookingValidation.existingAppointment.id,
+      });
+
+      return bookingValidation.existingAppointment;
+    }
 
     const result = await client.query(
       `
@@ -389,6 +422,45 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
     await client.query('ROLLBACK');
 
     if (error.code === '23505') {
+      const existingAfterConflict = await query(
+        `
+          SELECT id, user_id, appointment_date, appointment_time, status, price, created_at, updated_at
+          FROM appointments
+          WHERE appointment_date = $1 AND appointment_time = $2 AND status IN ('agendado', 'pago')
+          LIMIT 1
+        `,
+        [appointmentDate, normalizedTime],
+      );
+
+      if (existingAfterConflict.rowCount > 0) {
+        const conflictRow = existingAfterConflict.rows[0];
+
+        maybeDebugLog('post-conflict-db-analyze', {
+          userId,
+          date: appointmentDate,
+          time: normalizedTime,
+          conflictAppointmentId: conflictRow.id,
+          conflictUserId: conflictRow.user_id,
+          conflictStatus: conflictRow.status,
+        });
+
+        if (conflictRow.user_id === userId) {
+          return {
+            ...conflictRow,
+            appointment_time: normalizeTime(conflictRow.appointment_time),
+            price: Number(conflictRow.price),
+          };
+        }
+
+        throw new AppError('Horario ja reservado', 409, 'SLOT_ALREADY_BOOKED', {
+          date: appointmentDate,
+          time: normalizedTime,
+          source: 'db_unique_index',
+          conflictAppointmentId: conflictRow.id,
+          conflictStatus: conflictRow.status,
+        });
+      }
+
       maybeDebugLog('post-conflict-db', {
         userId,
         date: appointmentDate,
