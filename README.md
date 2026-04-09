@@ -79,7 +79,7 @@ Status permitidos em `appointments.status`:
 - `pago`
 - `disponivel`
 
-Preco padrao inicial: `45.00`
+Preco padrao inicial: `50.00`
 
 ## Seed opcional de admin
 
@@ -100,9 +100,25 @@ Se `ADMIN_EMAIL` e `ADMIN_PASSWORD` estiverem definidos, ao subir o servidor a A
 ### Cliente / autenticado
 
 - GET `/api/appointments/services`
+- GET `/api/appointments/slots?date=YYYY-MM-DD`
 - GET `/api/appointments/me`
 - POST `/api/appointments`
 - DELETE `/api/appointments/:id` (dono ou admin)
+
+## Janela movel de agendamento
+
+Para evitar sobrecarga no banco, o backend aplica manutencao automatica:
+
+- mantem apenas historico dos ultimos `60` dias (`BOOKING_HISTORY_RETENTION_DAYS`)
+- mantem agenda aberta de hoje ate os proximos `15` dias (`BOOKING_FUTURE_DAYS`)
+- remove agendamentos antigos fora do historico
+- garante dias futuros da janela em `business_days`
+
+No endpoint `GET /api/appointments/slots`, o backend retorna metadados da janela:
+
+- `booking_window_start`
+- `booking_window_end`
+- `retention_start`
 
 ## Catalogo de servicos e precos
 

@@ -1,6 +1,7 @@
 import { pool, query } from '../db/pool.js';
 import { AppError } from '../utils/appError.js';
-import { getCurrentWeekRangeByBusinessTimezone, isPastSlotByBusinessTimezone } from '../utils/validators.js';
+import { isPastSlotByBusinessTimezone } from '../utils/validators.js';
+import { getRollingWindowByBusinessTimezone, runRollingScheduleMaintenance } from './rollingScheduleMaintenanceService.js';
 import { resetWeeklyBookingFlagsIfNeeded } from './weeklyResetService.js';
 import { assertValidServiceType, getServiceLabel, getServicePrice } from '../utils/serviceCatalog.js';
 
@@ -156,11 +157,11 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
 
   const dayOverride = dayOverrideResult.rowCount > 0 ? dayOverrideResult.rows[0] : null;
 
-  const week = getCurrentWeekRangeByBusinessTimezone();
+  const window = getRollingWindowByBusinessTimezone();
 
-  if (dateString < week.weekStart || dateString > week.weekEnd) {
+  if (dateString < window.bookingStartDate || dateString > window.bookingEndDate) {
     throw new AppError(
-      `Agendamentos permitidos somente na semana atual (${week.weekStart} a ${week.weekEnd})`,
+      `Agendamentos permitidos somente de ${window.bookingStartDate} ate ${window.bookingEndDate}`,
       400,
       'VALIDATION_ERROR',
     );
@@ -269,21 +270,23 @@ export async function listMyAppointments(userId) {
 }
 
 export async function listSlotsByDate(appointmentDate) {
+  await runRollingScheduleMaintenance();
   await resetWeeklyBookingFlagsIfNeeded();
 
   const weekday = getWeekdayFromDate(appointmentDate);
   const nowContext = isPastSlotByBusinessTimezone(appointmentDate, '00:00');
-  const week = getCurrentWeekRangeByBusinessTimezone();
+  const window = getRollingWindowByBusinessTimezone();
 
-  if (appointmentDate < week.weekStart || appointmentDate > week.weekEnd) {
+  if (appointmentDate < window.bookingStartDate || appointmentDate > window.bookingEndDate) {
     return {
       slots: [],
       meta: {
         timezone: nowContext.timezone,
         server_now_date: nowContext.currentDate,
         server_now: `${nowContext.currentDate}T${minutesToHourMinute(nowContext.currentMinutes)}:00`,
-        week_start: week.weekStart,
-        week_end: week.weekEnd,
+        booking_window_start: window.bookingStartDate,
+        booking_window_end: window.bookingEndDate,
+        retention_start: window.retentionStartDate,
       },
     };
   }
@@ -362,13 +365,15 @@ export async function listSlotsByDate(appointmentDate) {
       timezone: nowContext.timezone,
       server_now_date: nowContext.currentDate,
       server_now: `${nowContext.currentDate}T${minutesToHourMinute(nowContext.currentMinutes)}:00`,
-      week_start: week.weekStart,
-      week_end: week.weekEnd,
+      booking_window_start: window.bookingStartDate,
+      booking_window_end: window.bookingEndDate,
+      retention_start: window.retentionStartDate,
     },
   };
 }
 
 export async function createAppointment({ userId, appointmentDate, appointmentTime, serviceType }) {
+  await runRollingScheduleMaintenance();
   await resetWeeklyBookingFlagsIfNeeded();
 
   const normalizedTime = normalizeTime(appointmentTime);

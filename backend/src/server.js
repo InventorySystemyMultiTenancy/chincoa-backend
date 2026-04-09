@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import app, { allowedOrigins } from './app.js';
 import { seedInitialAdmin } from './db/seedAdmin.js';
+import { startRollingScheduleMaintenance } from './services/rollingScheduleMaintenanceService.js';
 import { startWeeklyResetMaintenance } from './services/weeklyResetService.js';
 
 dotenv.config();
@@ -9,6 +10,7 @@ const port = Number(process.env.PORT || 3001);
 
 async function bootstrap() {
   await seedInitialAdmin();
+  await startRollingScheduleMaintenance();
   await startWeeklyResetMaintenance();
 
   app.listen(port, () => {
