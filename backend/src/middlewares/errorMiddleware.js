@@ -12,7 +12,10 @@ export function errorHandler(error, _req, res, _next) {
   const message = error.message || 'Erro interno no servidor';
   const details = error.details || null;
 
-  if (appointmentDebugLogs && _req.path.startsWith('/api/appointments')) {
+  if (
+    appointmentDebugLogs
+    && (_req.path.startsWith('/api/appointments') || _req.path.startsWith('/api/admin/appointments'))
+  ) {
     console.log(
       '[appointments:error]',
       JSON.stringify({

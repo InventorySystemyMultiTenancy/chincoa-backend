@@ -97,17 +97,33 @@ export async function updateAppointmentStatus({ appointmentId, status }) {
     };
   }
 
-  const result = await query(
-    `
-      UPDATE appointments
-      SET
-        status = $2,
-        updated_at = NOW()
-      WHERE id = $1
-      RETURNING id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
-    `,
-    [appointmentId, status],
-  );
+  let result;
+
+  try {
+    result = await query(
+      `
+        UPDATE appointments
+        SET
+          status = $2,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
+      `,
+      [appointmentId, status],
+    );
+  } catch (error) {
+    if (error.code === '23514' && String(error.constraint || '').includes('appointments_service_type_check')) {
+      throw new AppError('Tipo de servico invalido no agendamento. Atualize o servico antes de alterar status.', 400, 'INVALID_SERVICE_TYPE', {
+        appointmentId,
+      });
+    }
+
+    if (error.code === '23514' && String(error.constraint || '').includes('appointment_user_status_consistency')) {
+      throw new AppError('Nao e possivel marcar status sem cliente reservado', 400, 'SLOT_WITHOUT_USER');
+    }
+
+    throw error;
+  }
 
   if (result.rowCount === 0) {
     throw new AppError('Agendamento nao encontrado', 404, 'APPOINTMENT_NOT_FOUND');

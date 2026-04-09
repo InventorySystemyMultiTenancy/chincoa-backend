@@ -87,6 +87,34 @@ ALTER TABLE appointments
   ADD COLUMN IF NOT EXISTS service_type TEXT;
 
 UPDATE appointments
+SET service_type = CASE
+  WHEN service_type IS NULL OR btrim(service_type) = '' THEN 'corte'
+  WHEN lower(btrim(service_type)) = 'corte' THEN 'corte'
+  WHEN lower(btrim(service_type)) = 'sobrancelha' THEN 'sobrancelha'
+  WHEN lower(btrim(service_type)) = 'barba' THEN 'barba'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'sobrancelha_cabelo',
+    'sobrancelha_e_cabelo',
+    'cabelo_sobrancelha',
+    'cabelo_e_sobrancelha'
+  ) THEN 'sobrancelha_cabelo'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'cabelo_sobrancelha_barba',
+    'cabelo_e_sobrancelha_e_barba',
+    'barba_cabelo_sobrancelha',
+    'barba_e_cabelo_e_sobrancelha'
+  ) THEN 'cabelo_sobrancelha_barba'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) LIKE 'massagem_facial%'
+    THEN 'massagem_facial_toalha'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'completo',
+    'completo_tudo',
+    'tudo'
+  ) THEN 'completo'
+  ELSE 'corte'
+END;
+
+UPDATE appointments
 SET service_type = 'corte'
 WHERE service_type IS NULL;
 
