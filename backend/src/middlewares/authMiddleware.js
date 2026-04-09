@@ -23,7 +23,7 @@ export async function requireAuth(req, _res, next) {
 
     const result = await query(
       `
-        SELECT id, full_name, email, phone, role, created_at
+        SELECT id, full_name, email, phone, birth_date, role, created_at
         FROM users
         WHERE id = $1
       `,

@@ -4,6 +4,7 @@ import { assertValidServiceType } from './serviceCatalog.js';
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const PHONE_DIGITS_REGEX = /^\d{10,15}$/;
 const DEFAULT_BUSINESS_TIMEZONE = 'America/Sao_Paulo';
 
 export function getNowByBusinessTimezone() {
@@ -105,6 +106,14 @@ export function validateEmail(email) {
 export function validatePassword(password) {
   if (String(password || '').length < 6) {
     throw new AppError('Senha deve ter no minimo 6 caracteres', 400, 'VALIDATION_ERROR');
+  }
+}
+
+export function validatePhone(phone) {
+  const normalized = String(phone || '').replace(/\D/g, '');
+
+  if (!PHONE_DIGITS_REGEX.test(normalized)) {
+    throw new AppError('Telefone invalido. Use entre 10 e 15 digitos', 400, 'VALIDATION_ERROR');
   }
 }
 

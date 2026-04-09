@@ -97,6 +97,18 @@ Se `ADMIN_EMAIL` e `ADMIN_PASSWORD` estiverem definidos, ao subir o servidor a A
 - POST `/api/auth/login`
 - GET `/api/auth/me` (autenticado)
 
+Regras atuais de autenticacao:
+
+- email e opcional no cadastro
+- telefone e obrigatorio no cadastro
+- data de nascimento (`birth_date`) e obrigatoria no cadastro
+- login e feito apenas com `phone` + `password`
+
+Regra promocional:
+
+- no aniversario do cliente, servico `corte` recebe 50% de desconto automaticamente
+- `GET /api/auth/me` retorna `birthday_discount` para mostrar alerta na home
+
 ### Cliente / autenticado
 
 - GET `/api/appointments/services`
@@ -154,8 +166,9 @@ curl -X POST http://localhost:3001/api/auth/register \
 	-H "Content-Type: application/json" \
 	-d '{
 		"full_name": "Maria Silva",
-		"email": "maria@email.com",
 		"phone": "11999999999",
+		"birth_date": "1999-05-20",
+		"email": "maria@email.com",
 		"password": "123456"
 	}'
 ```
@@ -165,7 +178,7 @@ curl -X POST http://localhost:3001/api/auth/register \
 ```bash
 curl -X POST http://localhost:3001/api/auth/login \
 	-H "Content-Type: application/json" \
-	-d '{"email": "maria@email.com", "password": "123456"}'
+	-d '{"phone": "11999999999", "password": "123456"}'
 ```
 
 ### Criar agendamento

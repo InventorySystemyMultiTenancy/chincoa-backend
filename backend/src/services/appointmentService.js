@@ -142,6 +142,66 @@ function serializeAppointment(row) {
   };
 }
 
+function isBirthdayMatchForDate(birthDate, dateString) {
+  if (!birthDate || !dateString) {
+    return false;
+  }
+
+  return String(birthDate).slice(5, 10) === String(dateString).slice(5, 10);
+}
+
+async function resolveAppointmentPricing({ client, userId, appointmentDate, serviceType }) {
+  const basePrice = getServicePrice(serviceType);
+
+  if (basePrice === null) {
+    throw new AppError('Tabela de preco nao encontrada para o servico', 500, 'SERVICE_PRICE_NOT_CONFIGURED', {
+      service_type: serviceType,
+    });
+  }
+
+  if (serviceType !== 'corte') {
+    return {
+      finalPrice: basePrice,
+      discount: null,
+    };
+  }
+
+  const userResult = await client.query(
+    `
+      SELECT birth_date
+      FROM users
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [userId],
+  );
+
+  const birthDate = userResult.rowCount > 0 ? userResult.rows[0].birth_date : null;
+  const hasBirthdayDiscount = isBirthdayMatchForDate(birthDate, appointmentDate);
+
+  if (!hasBirthdayDiscount) {
+    return {
+      finalPrice: basePrice,
+      discount: null,
+    };
+  }
+
+  const discounted = Number((basePrice * 0.5).toFixed(2));
+
+  return {
+    finalPrice: discounted,
+    discount: {
+      applied: true,
+      type: 'birthday',
+      service_type: 'corte',
+      base_price: basePrice,
+      discount_percent: 50,
+      final_price: discounted,
+      message: 'Parabens! Voce recebeu 50% de desconto no corte.',
+    },
+  };
+}
+
 async function assertSlotEnabledForBookingWithClient(client, dateString, timeString, userId) {
   const normalizedTime = normalizeTime(timeString);
 
@@ -378,13 +438,6 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
 
   const normalizedTime = normalizeTime(appointmentTime);
   const normalizedServiceType = assertValidServiceType(serviceType);
-  const resolvedPrice = getServicePrice(normalizedServiceType);
-
-  if (resolvedPrice === null) {
-    throw new AppError('Tabela de preco nao encontrada para o servico', 500, 'SERVICE_PRICE_NOT_CONFIGURED', {
-      service_type: normalizedServiceType,
-    });
-  }
 
   const client = await pool.connect();
 
@@ -400,6 +453,13 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
       normalizedTime,
       userId,
     );
+
+    const pricing = await resolveAppointmentPricing({
+      client,
+      userId,
+      appointmentDate,
+      serviceType: normalizedServiceType,
+    });
 
     if (!bookingValidation.shouldInsert) {
       await client.query('COMMIT');
@@ -428,7 +488,7 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
           AND user_id IS NULL
         RETURNING id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
       `,
-      [userId, appointmentDate, normalizedTime, normalizedServiceType, resolvedPrice],
+      [userId, appointmentDate, normalizedTime, normalizedServiceType, pricing.finalPrice],
     );
 
     if (legacyReusableSlot.rowCount > 0) {
@@ -450,7 +510,10 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
         appointmentId: legacyReusableSlot.rows[0].id,
       });
 
-      return serializeAppointment(legacyReusableSlot.rows[0]);
+      return {
+        ...serializeAppointment(legacyReusableSlot.rows[0]),
+        discount: pricing.discount,
+      };
     }
 
     const result = await client.query(
@@ -459,7 +522,7 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
         VALUES ($1, $2, $3, $4, 'agendado', $5)
         RETURNING id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
       `,
-      [userId, appointmentDate, normalizedTime, normalizedServiceType, resolvedPrice],
+      [userId, appointmentDate, normalizedTime, normalizedServiceType, pricing.finalPrice],
     );
 
     await client.query(
@@ -480,7 +543,10 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
       appointmentId: result.rows[0].id,
     });
 
-    return serializeAppointment(result.rows[0]);
+    return {
+      ...serializeAppointment(result.rows[0]),
+      discount: pricing.discount,
+    };
   } catch (error) {
     await client.query('ROLLBACK');
 

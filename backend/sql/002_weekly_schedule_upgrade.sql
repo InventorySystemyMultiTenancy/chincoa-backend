@@ -4,12 +4,17 @@ SET search_path TO public;
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   full_name TEXT NOT NULL,
-  email TEXT NOT NULL UNIQUE,
-  phone TEXT NOT NULL DEFAULT '',
+  email TEXT,
+  phone TEXT NOT NULL UNIQUE,
+  birth_date DATE,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'client' CHECK (role IN ('admin', 'client')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_not_null
+  ON users (lower(email))
+  WHERE email IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS business_days (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
