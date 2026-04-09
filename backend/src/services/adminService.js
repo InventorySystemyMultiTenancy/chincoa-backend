@@ -1,6 +1,15 @@
 import { query } from '../db/pool.js';
 import { AppError } from '../utils/appError.js';
 
+function normalizeTime(value) {
+  return String(value).slice(0, 5);
+}
+
+function getWeekdayFromDate(dateString) {
+  const date = new Date(`${dateString}T00:00:00`);
+  return date.getDay();
+}
+
 export async function listAppointmentsByDate(date) {
   const params = [];
   let whereClause = '';
@@ -55,12 +64,37 @@ export async function updateAppointmentStatus({ appointmentId, status }) {
     throw new AppError('Nao e possivel marcar status sem cliente reservado', 400, 'SLOT_WITHOUT_USER');
   }
 
+  if (status === 'disponivel') {
+    await query(
+      `
+        UPDATE business_hours
+        SET is_booked_week = false
+        WHERE weekday = $1 AND slot_time = $2
+      `,
+      [getWeekdayFromDate(slot.appointment_date), normalizeTime(slot.appointment_time)],
+    );
+
+    await query(
+      `
+        DELETE FROM appointments
+        WHERE id = $1
+      `,
+      [appointmentId],
+    );
+
+    return {
+      ...slot,
+      user_id: null,
+      status: 'disponivel',
+      updated_at: new Date().toISOString(),
+    };
+  }
+
   const result = await query(
     `
       UPDATE appointments
       SET
         status = $2,
-        user_id = CASE WHEN $2 = 'disponivel' THEN NULL ELSE user_id END,
         updated_at = NOW()
       WHERE id = $1
       RETURNING id, user_id, appointment_date, appointment_time, status, price, created_at, updated_at
@@ -72,10 +106,43 @@ export async function updateAppointmentStatus({ appointmentId, status }) {
     throw new AppError('Agendamento nao encontrado', 404, 'APPOINTMENT_NOT_FOUND');
   }
 
+  await query(
+    `
+      UPDATE business_hours
+      SET is_booked_week = true
+      WHERE weekday = $1 AND slot_time = $2
+    `,
+    [getWeekdayFromDate(slot.appointment_date), normalizeTime(slot.appointment_time)],
+  );
+
   return result.rows[0];
 }
 
 export async function deleteAppointmentAsAdmin(appointmentId) {
+  const current = await query(
+    `
+      SELECT id, appointment_date, appointment_time
+      FROM appointments
+      WHERE id = $1
+    `,
+    [appointmentId],
+  );
+
+  if (current.rowCount === 0) {
+    throw new AppError('Agendamento nao encontrado', 404, 'APPOINTMENT_NOT_FOUND');
+  }
+
+  const appointment = current.rows[0];
+
+  await query(
+    `
+      UPDATE business_hours
+      SET is_booked_week = false
+      WHERE weekday = $1 AND slot_time = $2
+    `,
+    [getWeekdayFromDate(appointment.appointment_date), normalizeTime(appointment.appointment_time)],
+  );
+
   const result = await query(
     `
       DELETE FROM appointments

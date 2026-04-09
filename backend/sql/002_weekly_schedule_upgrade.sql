@@ -24,8 +24,15 @@ CREATE TABLE IF NOT EXISTS business_hours (
   weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),
   slot_time TIME NOT NULL,
   is_enabled BOOLEAN NOT NULL DEFAULT true,
+  is_booked_week BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (weekday, slot_time)
+);
+
+CREATE TABLE IF NOT EXISTS system_settings (
+  setting_key TEXT PRIMARY KEY,
+  setting_value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS appointments (
@@ -40,6 +47,9 @@ CREATE TABLE IF NOT EXISTS appointments (
 
 ALTER TABLE business_hours
   ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN NOT NULL DEFAULT true;
+
+ALTER TABLE business_hours
+  ADD COLUMN IF NOT EXISTS is_booked_week BOOLEAN NOT NULL DEFAULT false;
 
 DO $$
 BEGIN

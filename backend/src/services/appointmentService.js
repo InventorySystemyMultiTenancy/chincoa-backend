@@ -1,6 +1,7 @@
 import { pool, query } from '../db/pool.js';
 import { AppError } from '../utils/appError.js';
-import { isPastSlotByBusinessTimezone } from '../utils/validators.js';
+import { getCurrentWeekRangeByBusinessTimezone, isPastSlotByBusinessTimezone } from '../utils/validators.js';
+import { resetWeeklyBookingFlagsIfNeeded } from './weeklyResetService.js';
 
 const DEFAULT_PRICE = 45;
 const APPOINTMENT_DEBUG_LOGS = String(process.env.APPOINTMENT_DEBUG_LOGS || '').trim() === 'true';
@@ -27,7 +28,7 @@ async function getDayOverride(dateString) {
 async function getHoursByWeekday(weekday) {
   const result = await query(
     `
-      SELECT id, weekday, slot_time, is_enabled
+      SELECT id, weekday, slot_time, is_enabled, is_booked_week
       FROM business_hours
       WHERE weekday = $1
       ORDER BY slot_time ASC
@@ -95,6 +96,15 @@ function getSlotDecision({ dateString, timeString, dayOverride, hour, existing }
     };
   }
 
+  if (hour.is_booked_week) {
+    return {
+      status: existing?.status || 'agendado',
+      reason: 'Horario ja agendado nesta semana',
+      code: 'SLOT_ALREADY_BOOKED',
+      timeContext,
+    };
+  }
+
   if (!existing) {
     return {
       status: 'disponivel',
@@ -135,15 +145,25 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
 
   const dayOverride = dayOverrideResult.rowCount > 0 ? dayOverrideResult.rows[0] : null;
 
+  const week = getCurrentWeekRangeByBusinessTimezone();
+
+  if (dateString < week.weekStart || dateString > week.weekEnd) {
+    throw new AppError(
+      `Agendamentos permitidos somente na semana atual (${week.weekStart} a ${week.weekEnd})`,
+      400,
+      'VALIDATION_ERROR',
+    );
+  }
+
   const weekday = getWeekdayFromDate(dateString);
 
   const hourResult = await client.query(
     `
-      SELECT id, weekday, slot_time, is_enabled
+      SELECT id, weekday, slot_time, is_enabled, is_booked_week
       FROM business_hours
       WHERE weekday = $1 AND slot_time = $2
       LIMIT 1
-      FOR SHARE
+      FOR UPDATE
     `,
     [weekday, normalizedTime],
   );
@@ -221,8 +241,24 @@ export async function listMyAppointments(userId) {
 }
 
 export async function listSlotsByDate(appointmentDate) {
+  await resetWeeklyBookingFlagsIfNeeded();
+
   const weekday = getWeekdayFromDate(appointmentDate);
   const nowContext = isPastSlotByBusinessTimezone(appointmentDate, '00:00');
+  const week = getCurrentWeekRangeByBusinessTimezone();
+
+  if (appointmentDate < week.weekStart || appointmentDate > week.weekEnd) {
+    return {
+      slots: [],
+      meta: {
+        timezone: nowContext.timezone,
+        server_now_date: nowContext.currentDate,
+        server_now: `${nowContext.currentDate}T${minutesToHourMinute(nowContext.currentMinutes)}:00`,
+        week_start: week.weekStart,
+        week_end: week.weekEnd,
+      },
+    };
+  }
 
   const [dayOverride, hours, booked] = await Promise.all([
     getDayOverride(appointmentDate),
@@ -265,7 +301,7 @@ export async function listSlotsByDate(appointmentDate) {
       };
     }
 
-    if (!existing) {
+    if (decision.status === 'disponivel') {
       return {
         id: hour.id,
         appointment_id: null,
@@ -280,13 +316,13 @@ export async function listSlotsByDate(appointmentDate) {
 
     return {
       id: hour.id,
-      appointment_id: existing.id,
-      user_id: existing.user_id,
-      appointment_date: existing.appointment_date,
-      appointment_time: String(existing.appointment_time).slice(0, 5),
-      status: existing.status,
-      price: Number(existing.price),
-      reason: null,
+      appointment_id: existing?.id || null,
+      user_id: existing?.user_id || null,
+      appointment_date: existing?.appointment_date || appointmentDate,
+      appointment_time: normalizeTime(existing?.appointment_time || time),
+      status: existing?.status || 'agendado',
+      price: Number(existing?.price || DEFAULT_PRICE),
+      reason: existing ? null : 'Horario ja reservado nesta semana',
     };
   });
 
@@ -296,11 +332,15 @@ export async function listSlotsByDate(appointmentDate) {
       timezone: nowContext.timezone,
       server_now_date: nowContext.currentDate,
       server_now: `${nowContext.currentDate}T${minutesToHourMinute(nowContext.currentMinutes)}:00`,
+      week_start: week.weekStart,
+      week_end: week.weekEnd,
     },
   };
 }
 
 export async function createAppointment({ userId, appointmentDate, appointmentTime }) {
+  await resetWeeklyBookingFlagsIfNeeded();
+
   const normalizedTime = normalizeTime(appointmentTime);
   const client = await pool.connect();
 
@@ -315,6 +355,15 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
         RETURNING id, user_id, appointment_date, appointment_time, status, price, created_at, updated_at
       `,
       [userId, appointmentDate, normalizedTime, DEFAULT_PRICE],
+    );
+
+    await client.query(
+      `
+        UPDATE business_hours
+        SET is_booked_week = true
+        WHERE weekday = $1 AND slot_time = $2
+      `,
+      [getWeekdayFromDate(appointmentDate), normalizedTime],
     );
 
     await client.query('COMMIT');
@@ -343,7 +392,7 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
 export async function deleteAppointmentByOwnerOrAdmin({ appointmentId, user }) {
   const result = await query(
     `
-      SELECT id, user_id, status
+      SELECT id, user_id, status, appointment_date, appointment_time
       FROM appointments
       WHERE id = $1
     `,
@@ -364,6 +413,15 @@ export async function deleteAppointmentByOwnerOrAdmin({ appointmentId, user }) {
   if (user.role !== 'admin' && appointment.status === 'pago') {
     throw new AppError('Nao e permitido cancelar agendamento pago', 400, 'PAID_APPOINTMENT_CANNOT_CANCEL');
   }
+
+  await query(
+    `
+      UPDATE business_hours
+      SET is_booked_week = false
+      WHERE weekday = $1 AND slot_time = $2
+    `,
+    [getWeekdayFromDate(appointment.appointment_date), normalizeTime(appointment.appointment_time)],
+  );
 
   await query(
     `

@@ -60,6 +60,28 @@ export function isPastSlotByBusinessTimezone(dateString, timeString) {
   };
 }
 
+export function getCurrentWeekRangeByBusinessTimezone() {
+  const { currentDate, timezone } = getNowByBusinessTimezone();
+  const current = new Date(`${currentDate}T00:00:00`);
+  const day = current.getDay();
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+
+  const monday = new Date(current);
+  monday.setDate(monday.getDate() + diffToMonday);
+
+  const sunday = new Date(monday);
+  sunday.setDate(sunday.getDate() + 6);
+
+  const toDateOnly = (value) => value.toISOString().slice(0, 10);
+
+  return {
+    weekStart: toDateOnly(monday),
+    weekEnd: toDateOnly(sunday),
+    timezone,
+    currentDate,
+  };
+}
+
 export function requireFields(payload, fields) {
   const missing = fields.filter((field) => {
     const value = payload[field];
