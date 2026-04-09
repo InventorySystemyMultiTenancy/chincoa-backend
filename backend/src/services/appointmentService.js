@@ -9,8 +9,32 @@ const DEFAULT_PRICE = getServicePrice('corte') || 50;
 const APPOINTMENT_DEBUG_LOGS = String(process.env.APPOINTMENT_DEBUG_LOGS || '').trim() === 'true';
 
 function getWeekdayFromDate(dateString) {
-  const date = new Date(`${dateString}T00:00:00`);
-  return date.getDay();
+  if (dateString instanceof Date && !Number.isNaN(dateString.getTime())) {
+    return dateString.getDay();
+  }
+
+  const text = String(dateString || '').trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = new Date(year, month - 1, day);
+
+    if (!Number.isNaN(date.getTime())) {
+      return date.getDay();
+    }
+  }
+
+  const fallbackDate = new Date(text);
+  if (!Number.isNaN(fallbackDate.getTime())) {
+    return fallbackDate.getDay();
+  }
+
+  throw new AppError('Data invalida para calcular dia da semana', 500, 'INVALID_APPOINTMENT_DATE', {
+    appointment_date: dateString,
+  });
 }
 
 async function getDayOverride(dateString) {
