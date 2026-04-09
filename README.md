@@ -34,6 +34,13 @@ Copie [backend/.env.example](backend/.env.example) para [backend/.env](backend/.
 - NODE_ENV
 - ADMIN_EMAIL (opcional)
 - ADMIN_PASSWORD (opcional)
+- MP_ACCESS_TOKEN
+- MP_DEVICE_ID
+- BACKEND_PUBLIC_URL (URL publica do backend para receber notificacoes)
+- MP_API_BASE_URL (opcional, padrao Mercado Pago)
+- MP_REQUEST_TIMEOUT_MS (opcional)
+- MP_MAX_RETRIES (opcional)
+- PAYMENT_DEBUG_LOGS (opcional)
 
 ## Como rodar local
 
@@ -116,6 +123,18 @@ Regra promocional:
 - GET `/api/appointments/me`
 - POST `/api/appointments`
 - DELETE `/api/appointments/:id` (dono ou admin)
+
+### Pagamentos Mercado Pago
+
+- POST `/api/payments/create-pix` (auth)
+- POST `/api/payments/create-point` (auth)
+- GET `/api/payments/status/:reference` (auth)
+- POST `/api/payments/cancel/:reference` (auth)
+- DELETE `/api/payments/cancel/:reference` (auth)
+- POST `/api/payments/ipn/mercadopago` (sem auth)
+- POST `/api/payments/webhooks/mercadopago` (sem auth)
+
+Compatibilidade com referencia legada: os mesmos endpoints tambem respondem em `/api/payment/*`.
 
 ## Janela movel de agendamento
 
