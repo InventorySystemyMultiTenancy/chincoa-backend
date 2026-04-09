@@ -1,5 +1,7 @@
 import { sendError } from '../utils/apiResponse.js';
 
+const appointmentDebugLogs = String(process.env.APPOINTMENT_DEBUG_LOGS || '').trim() === 'true';
+
 export function notFoundHandler(_req, res) {
   return sendError(res, 404, 'Rota nao encontrada', 'NOT_FOUND');
 }
@@ -9,6 +11,20 @@ export function errorHandler(error, _req, res, _next) {
   const code = error.code || 'INTERNAL_ERROR';
   const message = error.message || 'Erro interno no servidor';
   const details = error.details || null;
+
+  if (appointmentDebugLogs && _req.path.startsWith('/api/appointments')) {
+    console.log(
+      '[appointments:error]',
+      JSON.stringify({
+        method: _req.method,
+        path: _req.path,
+        statusCode,
+        code,
+        message,
+        details,
+      }),
+    );
+  }
 
   if (statusCode >= 500) {
     console.error(error);

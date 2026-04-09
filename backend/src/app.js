@@ -9,6 +9,7 @@ import { errorHandler, notFoundHandler } from './middlewares/errorMiddleware.js'
 
 const app = express();
 const defaultOrigins = ['http://localhost:5173', 'http://localhost:8080', 'https://chincoacortes.selfmachine.com.br/'];
+const appointmentDebugLogs = String(process.env.APPOINTMENT_DEBUG_LOGS || '').trim() === 'true';
 
 function getAllowedOrigins() {
   const fromCorsOrigins = (process.env.CORS_ORIGINS || '')
@@ -38,6 +39,42 @@ app.use(
 );
 
 app.use(express.json());
+
+if (appointmentDebugLogs) {
+  app.use((req, res, next) => {
+    if (!req.path.startsWith('/api/appointments')) {
+      return next();
+    }
+
+    const startedAt = Date.now();
+    const payload = req.method === 'POST' ? req.body : req.query;
+    const authHeader = req.headers.authorization;
+
+    console.log(
+      '[appointments:req]',
+      JSON.stringify({
+        method: req.method,
+        path: req.path,
+        payload,
+        hasAuth: Boolean(authHeader),
+      }),
+    );
+
+    res.on('finish', () => {
+      console.log(
+        '[appointments:res]',
+        JSON.stringify({
+          method: req.method,
+          path: req.path,
+          statusCode: res.statusCode,
+          durationMs: Date.now() - startedAt,
+        }),
+      );
+    });
+
+    return next();
+  });
+}
 
 app.use('/api', healthRoutes);
 app.use('/api/auth', authRoutes);

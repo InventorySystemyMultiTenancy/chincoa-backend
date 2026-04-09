@@ -195,6 +195,9 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
     date: dateString,
     time: normalizedTime,
     decision,
+    dayOverride,
+    hour,
+    existing,
   });
 
   if (decision.status === 'disponivel') {
@@ -202,7 +205,13 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
   }
 
   if (decision.code === 'SLOT_ALREADY_BOOKED') {
-    throw new AppError('Horario ja reservado', 409, 'SLOT_ALREADY_BOOKED');
+    throw new AppError('Horario ja reservado', 409, 'SLOT_ALREADY_BOOKED', {
+      date: dateString,
+      time: normalizedTime,
+      byWeeklyFlag: Boolean(hour?.is_booked_week),
+      existingAppointmentId: existing?.id || null,
+      existingStatus: existing?.status || null,
+    });
   }
 
   if (decision.code === 'DAY_DISABLED') {
@@ -380,7 +389,19 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
     await client.query('ROLLBACK');
 
     if (error.code === '23505') {
-      throw new AppError('Horario ja reservado', 409, 'SLOT_ALREADY_BOOKED');
+      maybeDebugLog('post-conflict-db', {
+        userId,
+        date: appointmentDate,
+        time: normalizedTime,
+        postgresCode: error.code,
+        detail: error.detail,
+      });
+
+      throw new AppError('Horario ja reservado', 409, 'SLOT_ALREADY_BOOKED', {
+        date: appointmentDate,
+        time: normalizedTime,
+        source: 'db_unique_index',
+      });
     }
 
     throw error;
