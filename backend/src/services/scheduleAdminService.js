@@ -12,7 +12,7 @@ export async function listBusinessHours(weekday = null) {
 
   const result = await query(
     `
-      SELECT id, weekday, slot_time, is_enabled, is_booked_week, created_at
+      SELECT id, weekday, slot_time, is_booked_week, created_at
       FROM business_hours
       ${where}
       ORDER BY weekday ASC, slot_time ASC
@@ -26,15 +26,15 @@ export async function listBusinessHours(weekday = null) {
   }));
 }
 
-export async function createBusinessHour({ weekday, time, isEnabled = true }) {
+export async function createBusinessHour({ weekday, time }) {
   try {
     const result = await query(
       `
-        INSERT INTO business_hours (weekday, slot_time, is_enabled)
-        VALUES ($1, $2, $3)
-        RETURNING id, weekday, slot_time, is_enabled, is_booked_week, created_at
+        INSERT INTO business_hours (weekday, slot_time)
+        VALUES ($1, $2)
+        RETURNING id, weekday, slot_time, is_booked_week, created_at
       `,
-      [weekday, time, isEnabled],
+      [weekday, time],
     );
 
     return {
@@ -50,10 +50,10 @@ export async function createBusinessHour({ weekday, time, isEnabled = true }) {
   }
 }
 
-export async function updateBusinessHour({ id, weekday, time, isEnabled }) {
+export async function updateBusinessHour({ id, weekday, time }) {
   const current = await query(
     `
-      SELECT id, weekday, slot_time, is_enabled, created_at
+      SELECT id, weekday, slot_time, is_booked_week, created_at
       FROM business_hours
       WHERE id = $1
     `,
@@ -67,17 +67,16 @@ export async function updateBusinessHour({ id, weekday, time, isEnabled }) {
   const existing = current.rows[0];
   const nextWeekday = weekday ?? existing.weekday;
   const nextTime = time ?? String(existing.slot_time).slice(0, 5);
-  const nextIsEnabled = isEnabled ?? existing.is_enabled;
 
   try {
     const result = await query(
       `
         UPDATE business_hours
-        SET weekday = $2, slot_time = $3, is_enabled = $4
+        SET weekday = $2, slot_time = $3
         WHERE id = $1
-        RETURNING id, weekday, slot_time, is_enabled, is_booked_week, created_at
+        RETURNING id, weekday, slot_time, is_booked_week, created_at
       `,
-      [id, nextWeekday, nextTime, nextIsEnabled],
+      [id, nextWeekday, nextTime],
     );
 
     return {

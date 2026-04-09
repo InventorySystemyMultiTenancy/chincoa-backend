@@ -55,7 +55,7 @@ async function ensureSchema() {
       id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
       weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),
       slot_time TIME NOT NULL,
-      is_enabled BOOLEAN NOT NULL DEFAULT true,
+      is_booked_week BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (weekday, slot_time)
     );
@@ -107,12 +107,12 @@ async function createUser(email, role) {
 async function createHour(weekday, time, isEnabled = true) {
   await query(
     `
-      INSERT INTO business_hours (weekday, slot_time, is_enabled)
-      VALUES ($1, $2, $3)
+      INSERT INTO business_hours (weekday, slot_time)
+      VALUES ($1, $2)
       ON CONFLICT (weekday, slot_time)
-      DO UPDATE SET is_enabled = EXCLUDED.is_enabled
+      DO NOTHING
     `,
-    [weekday, time, isEnabled],
+    [weekday, time],
   );
 }
 
@@ -180,10 +180,10 @@ if (!hasDatabase) {
       assert.equal(second.body.error.code, 'SLOT_ALREADY_BOOKED');
     });
 
-    test('disabled slot blocked in GET and POST', async () => {
+    test('scheduled slot from weekly rule can be booked when hour exists', async () => {
       const date = '2026-04-17';
       const weekday = weekdayFromDate(date);
-      await createHour(weekday, '11:00', false);
+      await createHour(weekday, '11:00', true);
 
       const slotsResponse = await request(app).get(`/api/appointments/slots?date=${date}`);
       assert.equal(slotsResponse.status, 200);
@@ -195,8 +195,7 @@ if (!hasDatabase) {
         .set('Authorization', `Bearer ${clientToken}`)
         .send({ appointment_date: date, appointment_time: '11:00' });
 
-      assert.equal(bookResponse.status, 400);
-      assert.equal(bookResponse.body.error.code, 'SLOT_DISABLED');
+      assert.equal(bookResponse.status, 201);
     });
 
     test('disabled day blocked in GET and POST', async () => {

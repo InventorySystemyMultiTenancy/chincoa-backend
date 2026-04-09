@@ -23,7 +23,6 @@ CREATE TABLE IF NOT EXISTS business_hours (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),
   slot_time TIME NOT NULL,
-  is_enabled BOOLEAN NOT NULL DEFAULT true,
   is_booked_week BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (weekday, slot_time)
@@ -46,9 +45,6 @@ CREATE TABLE IF NOT EXISTS appointments (
 );
 
 ALTER TABLE business_hours
-  ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN NOT NULL DEFAULT true;
-
-ALTER TABLE business_hours
   ADD COLUMN IF NOT EXISTS is_booked_week BOOLEAN NOT NULL DEFAULT false;
 
 DO $$
@@ -60,12 +56,19 @@ BEGIN
       AND table_name = 'business_hours'
       AND column_name = 'enabled'
   ) THEN
-    EXECUTE 'UPDATE business_hours SET is_enabled = enabled';
+    EXECUTE 'ALTER TABLE business_hours DROP COLUMN enabled';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'business_hours'
+      AND column_name = 'is_enabled'
+  ) THEN
+    EXECUTE 'ALTER TABLE business_hours DROP COLUMN is_enabled';
   END IF;
 END $$;
-
-ALTER TABLE business_hours
-  DROP COLUMN IF EXISTS enabled;
 
 ALTER TABLE appointments
   ALTER COLUMN user_id DROP NOT NULL;

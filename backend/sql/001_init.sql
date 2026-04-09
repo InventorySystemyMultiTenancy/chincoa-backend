@@ -23,7 +23,6 @@ CREATE TABLE IF NOT EXISTS business_hours (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   weekday SMALLINT NOT NULL CHECK (weekday BETWEEN 0 AND 6),
   slot_time TIME NOT NULL,
-  is_enabled BOOLEAN NOT NULL DEFAULT true,
   is_booked_week BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (weekday, slot_time)

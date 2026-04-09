@@ -28,7 +28,7 @@ async function getDayOverride(dateString) {
 async function getHoursByWeekday(weekday) {
   const result = await query(
     `
-      SELECT id, weekday, slot_time, is_enabled, is_booked_week
+      SELECT id, weekday, slot_time, is_booked_week
       FROM business_hours
       WHERE weekday = $1
       ORDER BY slot_time ASC
@@ -87,10 +87,10 @@ function getSlotDecision({ dateString, timeString, dayOverride, hour, existing }
     };
   }
 
-  if (!hour || !hour.is_enabled) {
+  if (!hour) {
     return {
       status: 'desabilitado',
-      reason: 'Horario desabilitado',
+      reason: 'Horario nao cadastrado para este dia da semana',
       code: 'SLOT_DISABLED',
       timeContext,
     };
@@ -159,7 +159,7 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
 
   const hourResult = await client.query(
     `
-      SELECT id, weekday, slot_time, is_enabled, is_booked_week
+      SELECT id, weekday, slot_time, is_booked_week
       FROM business_hours
       WHERE weekday = $1 AND slot_time = $2
       LIMIT 1

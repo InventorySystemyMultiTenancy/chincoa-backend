@@ -16,7 +16,7 @@ async function getFirstMondaySlotMinutes() {
     `
       SELECT slot_time
       FROM business_hours
-      WHERE weekday = $1 AND is_enabled = true
+      WHERE weekday = $1
       ORDER BY slot_time ASC
       LIMIT 1
     `,

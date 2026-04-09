@@ -89,12 +89,11 @@ export async function postScheduleHour(req, res, next) {
 
     const weekday = Number(req.body.weekday);
     const time = String(req.body.time).trim();
-    const isEnabled = req.body.isEnabled !== undefined ? Boolean(req.body.isEnabled) : true;
 
     validateWeekday(weekday);
     validateTime(time);
 
-    const hour = await createBusinessHour({ weekday, time, isEnabled });
+    const hour = await createBusinessHour({ weekday, time });
     return sendSuccess(res, 201, { hour });
   } catch (error) {
     return next(error);
@@ -113,10 +112,6 @@ export async function patchScheduleHour(req, res, next) {
     if (req.body.time !== undefined) {
       payload.time = String(req.body.time).trim();
       validateTime(payload.time);
-    }
-
-    if (req.body.isEnabled !== undefined) {
-      payload.isEnabled = Boolean(req.body.isEnabled);
     }
 
     const hour = await updateBusinessHour({
