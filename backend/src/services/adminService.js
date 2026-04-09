@@ -113,7 +113,8 @@ export async function updateAppointmentStatus({ appointmentId, status }) {
               'sobrancelha_cabelo',
               'cabelo_sobrancelha_barba',
               'massagem_facial_toalha',
-              'completo'
+              'completo',
+              'servico_teste'
             ) THEN service_type
             ELSE 'corte'
           END,
