@@ -123,6 +123,11 @@ Use `GET /api/appointments/services` para obter a lista oficial.
 - GET `/api/admin/appointments?date=YYYY-MM-DD`
 - PATCH `/api/admin/appointments/:id/status`
 - DELETE `/api/admin/appointments/:id`
+- GET `/api/admin/reports/financial?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD`
+- GET `/api/admin/expenses/fixed`
+- POST `/api/admin/expenses/fixed`
+- GET `/api/admin/expenses/variable?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD`
+- POST `/api/admin/expenses/variable`
 
 ## Exemplos de chamadas
 

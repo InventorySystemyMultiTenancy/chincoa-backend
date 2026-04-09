@@ -1,14 +1,19 @@
 import { Router } from 'express';
 
 import {
+  getFinancialReportSummary,
+  getFixedExpenses,
   getScheduleDays,
   getScheduleHours,
+  getVariableExpenses,
   listAppointments,
   patchScheduleDay,
   patchScheduleHour,
   patchAppointmentStatus,
+  postFixedExpense,
   postScheduleDay,
   postScheduleHour,
+  postVariableExpense,
   removeAppointment,
   removeScheduleDay,
   removeScheduleHour,
@@ -22,6 +27,14 @@ router.use(requireAuth, requireAdmin);
 router.get('/appointments', listAppointments);
 router.patch('/appointments/:id/status', patchAppointmentStatus);
 router.delete('/appointments/:id', removeAppointment);
+
+router.get('/reports/financial', getFinancialReportSummary);
+
+router.get('/expenses/fixed', getFixedExpenses);
+router.post('/expenses/fixed', postFixedExpense);
+
+router.get('/expenses/variable', getVariableExpenses);
+router.post('/expenses/variable', postVariableExpense);
 
 router.get('/schedule/hours', getScheduleHours);
 router.post('/schedule/hours', postScheduleHour);

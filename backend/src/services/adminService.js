@@ -54,7 +54,7 @@ export async function listAppointmentsByDate(date) {
 export async function updateAppointmentStatus({ appointmentId, status }) {
   const current = await query(
     `
-      SELECT id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
+      SELECT id, user_id, appointment_date, appointment_time, status, price, created_at
       FROM appointments
       WHERE id = $1
     `,
@@ -105,6 +105,18 @@ export async function updateAppointmentStatus({ appointmentId, status }) {
         UPDATE appointments
         SET
           status = $2,
+          service_type = CASE
+            WHEN service_type IN (
+              'corte',
+              'sobrancelha',
+              'barba',
+              'sobrancelha_cabelo',
+              'cabelo_sobrancelha_barba',
+              'massagem_facial_toalha',
+              'completo'
+            ) THEN service_type
+            ELSE 'corte'
+          END,
           updated_at = NOW()
         WHERE id = $1
         RETURNING id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
@@ -112,6 +124,31 @@ export async function updateAppointmentStatus({ appointmentId, status }) {
       [appointmentId, status],
     );
   } catch (error) {
+    if (error.code === '42703') {
+      const fallback = await query(
+        `
+          UPDATE appointments
+          SET status = $2
+          WHERE id = $1
+          RETURNING id, user_id, appointment_date, appointment_time, status, price, created_at
+        `,
+        [appointmentId, status],
+      );
+
+      if (fallback.rowCount === 0) {
+        throw new AppError('Agendamento nao encontrado', 404, 'APPOINTMENT_NOT_FOUND');
+      }
+
+      return {
+        ...fallback.rows[0],
+        appointment_time: normalizeTime(fallback.rows[0].appointment_time),
+        service_type: 'corte',
+        service_label: getServiceLabel('corte'),
+        price: Number(fallback.rows[0].price),
+        updated_at: new Date().toISOString(),
+      };
+    }
+
     if (error.code === '23514' && String(error.constraint || '').includes('appointments_service_type_check')) {
       throw new AppError('Tipo de servico invalido no agendamento. Atualize o servico antes de alterar status.', 400, 'INVALID_SERVICE_TYPE', {
         appointmentId,

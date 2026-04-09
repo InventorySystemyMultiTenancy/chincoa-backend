@@ -13,6 +13,14 @@ import {
   updateBusinessDay,
   updateBusinessHour,
 } from '../services/scheduleAdminService.js';
+import {
+  createFixedExpense,
+  createVariableExpense,
+  getFinancialReport,
+  listFixedExpenses,
+  listVariableExpenses,
+} from '../services/reportingService.js';
+import { AppError } from '../utils/appError.js';
 import { sendSuccess } from '../utils/apiResponse.js';
 import {
   requireFields,
@@ -203,6 +211,114 @@ export async function removeScheduleDay(req, res, next) {
   try {
     await deleteBusinessDay(req.params.id);
     return sendSuccess(res, 200, { message: 'Dia removido com sucesso' });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getFinancialReportSummary(req, res, next) {
+  try {
+    const startDate = String(req.query.startDate || req.query.start_date || '').trim();
+    const endDate = String(req.query.endDate || req.query.end_date || '').trim();
+
+    requireFields(
+      {
+        start_date: startDate,
+        end_date: endDate,
+      },
+      ['start_date', 'end_date'],
+    );
+
+    validateDate(startDate);
+    validateDate(endDate);
+
+    if (startDate > endDate) {
+      throw new AppError('Data inicial nao pode ser maior que data final', 400, 'VALIDATION_ERROR');
+    }
+
+    const report = await getFinancialReport({ startDate, endDate });
+    return sendSuccess(res, 200, { report });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getFixedExpenses(req, res, next) {
+  try {
+    const fixedExpenses = await listFixedExpenses();
+    return sendSuccess(res, 200, { fixed_expenses: fixedExpenses });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function postFixedExpense(req, res, next) {
+  try {
+    requireFields(req.body, ['title', 'amount', 'starts_on']);
+
+    const startsOn = String(req.body.starts_on).trim();
+    const endsOn = req.body.ends_on ? String(req.body.ends_on).trim() : null;
+
+    validateDate(startsOn);
+
+    if (endsOn) {
+      validateDate(endsOn);
+    }
+
+    const fixedExpense = await createFixedExpense({
+      title: req.body.title,
+      amount: req.body.amount,
+      startsOn,
+      endsOn,
+      isActive: req.body.is_active,
+      notes: req.body.notes,
+    });
+
+    return sendSuccess(res, 201, { fixed_expense: fixedExpense });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getVariableExpenses(req, res, next) {
+  try {
+    const startDate = req.query.startDate || req.query.start_date || null;
+    const endDate = req.query.endDate || req.query.end_date || null;
+
+    if (startDate) {
+      validateDate(String(startDate).trim());
+    }
+
+    if (endDate) {
+      validateDate(String(endDate).trim());
+    }
+
+    const variableExpenses = await listVariableExpenses({
+      startDate: startDate ? String(startDate).trim() : null,
+      endDate: endDate ? String(endDate).trim() : null,
+    });
+
+    return sendSuccess(res, 200, { variable_expenses: variableExpenses });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function postVariableExpense(req, res, next) {
+  try {
+    requireFields(req.body, ['title', 'amount', 'expense_date']);
+
+    const expenseDate = String(req.body.expense_date).trim();
+    validateDate(expenseDate);
+
+    const variableExpense = await createVariableExpense({
+      title: req.body.title,
+      amount: req.body.amount,
+      expenseDate,
+      notes: req.body.notes,
+    });
+
+    return sendSuccess(res, 201, { variable_expense: variableExpense });
   } catch (error) {
     return next(error);
   }
