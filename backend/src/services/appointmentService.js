@@ -2,8 +2,9 @@ import { pool, query } from '../db/pool.js';
 import { AppError } from '../utils/appError.js';
 import { getCurrentWeekRangeByBusinessTimezone, isPastSlotByBusinessTimezone } from '../utils/validators.js';
 import { resetWeeklyBookingFlagsIfNeeded } from './weeklyResetService.js';
+import { assertValidServiceType, getServiceLabel, getServicePrice } from '../utils/serviceCatalog.js';
 
-const DEFAULT_PRICE = 45;
+const DEFAULT_PRICE = getServicePrice('corte') || 50;
 const APPOINTMENT_DEBUG_LOGS = String(process.env.APPOINTMENT_DEBUG_LOGS || '').trim() === 'true';
 
 function getWeekdayFromDate(dateString) {
@@ -42,7 +43,7 @@ async function getHoursByWeekday(weekday) {
 async function getBookedAppointmentsByDate(dateString) {
   const result = await query(
     `
-      SELECT id, user_id, appointment_date, appointment_time, status, price, created_at, updated_at
+      SELECT id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
       FROM appointments
       WHERE appointment_date = $1 AND status IN ('agendado', 'pago')
     `,
@@ -130,6 +131,16 @@ function maybeDebugLog(event, payload) {
   console.log(`[appointments:${event}]`, JSON.stringify(payload));
 }
 
+function serializeAppointment(row) {
+  return {
+    ...row,
+    appointment_time: normalizeTime(row.appointment_time),
+    service_type: row.service_type,
+    service_label: getServiceLabel(row.service_type),
+    price: Number(row.price),
+  };
+}
+
 async function assertSlotEnabledForBookingWithClient(client, dateString, timeString, userId) {
   const normalizedTime = normalizeTime(timeString);
 
@@ -172,7 +183,7 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
 
   const existingResult = await client.query(
     `
-      SELECT id, user_id, appointment_date, appointment_time, status, price
+      SELECT id, user_id, appointment_date, appointment_time, service_type, status, price
       FROM appointments
       WHERE appointment_date = $1 AND appointment_time = $2 AND status IN ('agendado', 'pago')
       LIMIT 1
@@ -208,11 +219,7 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
     if (existing && existing.user_id === userId) {
       return {
         shouldInsert: false,
-        existingAppointment: {
-          ...existing,
-          appointment_time: normalizeTime(existing.appointment_time),
-          price: Number(existing.price),
-        },
+        existingAppointment: serializeAppointment(existing),
       };
     }
 
@@ -222,6 +229,7 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
       byWeeklyFlag: Boolean(hour?.is_booked_week),
       existingAppointmentId: existing?.id || null,
       existingStatus: existing?.status || null,
+      existingServiceType: existing?.service_type || null,
     });
   }
 
@@ -249,7 +257,7 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
 export async function listMyAppointments(userId) {
   const result = await query(
     `
-      SELECT id, user_id, appointment_date, appointment_time, status, price, created_at, updated_at
+      SELECT id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
       FROM appointments
       WHERE user_id = $1 AND status IN ('agendado', 'pago')
       ORDER BY appointment_date DESC, appointment_time DESC
@@ -257,7 +265,7 @@ export async function listMyAppointments(userId) {
     [userId],
   );
 
-  return result.rows;
+  return result.rows.map(serializeAppointment);
 }
 
 export async function listSlotsByDate(appointmentDate) {
@@ -340,6 +348,8 @@ export async function listSlotsByDate(appointmentDate) {
       user_id: existing?.user_id || null,
       appointment_date: existing?.appointment_date || appointmentDate,
       appointment_time: normalizeTime(existing?.appointment_time || time),
+      service_type: existing?.service_type || null,
+      service_label: existing?.service_type ? getServiceLabel(existing.service_type) : null,
       status: existing?.status || 'agendado',
       price: Number(existing?.price || DEFAULT_PRICE),
       reason: existing ? null : 'Horario ja reservado nesta semana',
@@ -358,10 +368,19 @@ export async function listSlotsByDate(appointmentDate) {
   };
 }
 
-export async function createAppointment({ userId, appointmentDate, appointmentTime }) {
+export async function createAppointment({ userId, appointmentDate, appointmentTime, serviceType }) {
   await resetWeeklyBookingFlagsIfNeeded();
 
   const normalizedTime = normalizeTime(appointmentTime);
+  const normalizedServiceType = assertValidServiceType(serviceType);
+  const resolvedPrice = getServicePrice(normalizedServiceType);
+
+  if (resolvedPrice === null) {
+    throw new AppError('Tabela de preco nao encontrada para o servico', 500, 'SERVICE_PRICE_NOT_CONFIGURED', {
+      service_type: normalizedServiceType,
+    });
+  }
+
   const client = await pool.connect();
 
   try {
@@ -394,16 +413,17 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
       `
         UPDATE appointments
         SET user_id = $1,
+            service_type = $4,
             status = 'agendado',
-            price = $4,
+            price = $5,
             updated_at = NOW()
         WHERE appointment_date = $2
           AND appointment_time = $3
           AND status = 'disponivel'
           AND user_id IS NULL
-        RETURNING id, user_id, appointment_date, appointment_time, status, price, created_at, updated_at
+        RETURNING id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
       `,
-      [userId, appointmentDate, normalizedTime, DEFAULT_PRICE],
+      [userId, appointmentDate, normalizedTime, normalizedServiceType, resolvedPrice],
     );
 
     if (legacyReusableSlot.rowCount > 0) {
@@ -425,16 +445,16 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
         appointmentId: legacyReusableSlot.rows[0].id,
       });
 
-      return legacyReusableSlot.rows[0];
+      return serializeAppointment(legacyReusableSlot.rows[0]);
     }
 
     const result = await client.query(
       `
-        INSERT INTO appointments (user_id, appointment_date, appointment_time, status, price)
-        VALUES ($1, $2, $3, 'agendado', $4)
-        RETURNING id, user_id, appointment_date, appointment_time, status, price, created_at, updated_at
+        INSERT INTO appointments (user_id, appointment_date, appointment_time, service_type, status, price)
+        VALUES ($1, $2, $3, $4, 'agendado', $5)
+        RETURNING id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
       `,
-      [userId, appointmentDate, normalizedTime, DEFAULT_PRICE],
+      [userId, appointmentDate, normalizedTime, normalizedServiceType, resolvedPrice],
     );
 
     await client.query(
@@ -455,14 +475,14 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
       appointmentId: result.rows[0].id,
     });
 
-    return result.rows[0];
+    return serializeAppointment(result.rows[0]);
   } catch (error) {
     await client.query('ROLLBACK');
 
     if (error.code === '23505') {
       const existingAfterConflict = await query(
         `
-          SELECT id, user_id, appointment_date, appointment_time, status, price, created_at, updated_at
+          SELECT id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
           FROM appointments
           WHERE appointment_date = $1 AND appointment_time = $2 AND status IN ('agendado', 'pago')
           LIMIT 1
@@ -483,11 +503,7 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
         });
 
         if (conflictRow.user_id === userId) {
-          return {
-            ...conflictRow,
-            appointment_time: normalizeTime(conflictRow.appointment_time),
-            price: Number(conflictRow.price),
-          };
+          return serializeAppointment(conflictRow);
         }
 
         throw new AppError('Horario ja reservado', 409, 'SLOT_ALREADY_BOOKED', {

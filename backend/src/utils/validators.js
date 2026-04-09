@@ -1,4 +1,5 @@
 import { AppError } from './appError.js';
+import { assertValidServiceType } from './serviceCatalog.js';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -135,6 +136,10 @@ export function validateAppointmentStatus(status) {
   if (!['agendado', 'pago', 'disponivel'].includes(status)) {
     throw new AppError('Status invalido', 400, 'VALIDATION_ERROR');
   }
+}
+
+export function validateServiceType(serviceType) {
+  assertValidServiceType(serviceType);
 }
 
 export function ensureFutureSlot(dateString, timeString) {

@@ -1,5 +1,6 @@
 import { query } from '../db/pool.js';
 import { AppError } from '../utils/appError.js';
+import { getServiceLabel } from '../utils/serviceCatalog.js';
 
 function normalizeTime(value) {
   return String(value).slice(0, 5);
@@ -29,6 +30,7 @@ export async function listAppointmentsByDate(date) {
         u.phone,
         a.appointment_date,
         a.appointment_time,
+        a.service_type,
         a.status,
         a.price,
         a.created_at,
@@ -41,13 +43,18 @@ export async function listAppointmentsByDate(date) {
     params,
   );
 
-  return result.rows;
+  return result.rows.map((row) => ({
+    ...row,
+    appointment_time: normalizeTime(row.appointment_time),
+    service_label: getServiceLabel(row.service_type),
+    price: Number(row.price),
+  }));
 }
 
 export async function updateAppointmentStatus({ appointmentId, status }) {
   const current = await query(
     `
-      SELECT id, user_id, appointment_date, appointment_time, status, price, created_at, updated_at
+      SELECT id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
       FROM appointments
       WHERE id = $1
     `,
@@ -97,7 +104,7 @@ export async function updateAppointmentStatus({ appointmentId, status }) {
         status = $2,
         updated_at = NOW()
       WHERE id = $1
-      RETURNING id, user_id, appointment_date, appointment_time, status, price, created_at, updated_at
+      RETURNING id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
     `,
     [appointmentId, status],
   );
@@ -115,7 +122,12 @@ export async function updateAppointmentStatus({ appointmentId, status }) {
     [getWeekdayFromDate(slot.appointment_date), normalizeTime(slot.appointment_time)],
   );
 
-  return result.rows[0];
+  return {
+    ...result.rows[0],
+    appointment_time: normalizeTime(result.rows[0].appointment_time),
+    service_label: getServiceLabel(result.rows[0].service_type),
+    price: Number(result.rows[0].price),
+  };
 }
 
 export async function deleteAppointmentAsAdmin(appointmentId) {

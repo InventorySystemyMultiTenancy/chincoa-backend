@@ -65,6 +65,17 @@ async function ensureSchema() {
       user_id UUID REFERENCES users(id) ON DELETE SET NULL,
       appointment_date DATE NOT NULL,
       appointment_time TIME NOT NULL,
+      service_type TEXT NOT NULL DEFAULT 'corte' CHECK (
+        service_type IN (
+          'corte',
+          'sobrancelha',
+          'barba',
+          'sobrancelha_cabelo',
+          'cabelo_sobrancelha_barba',
+          'massagem_facial_toalha',
+          'completo'
+        )
+      ),
       status TEXT NOT NULL DEFAULT 'agendado' CHECK (status IN ('agendado', 'pago', 'disponivel')),
       price NUMERIC(10,2) NOT NULL DEFAULT 45.00,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -152,7 +163,7 @@ if (!hasDatabase) {
       const bookResponse = await request(app)
         .post('/api/appointments')
         .set('Authorization', `Bearer ${clientToken}`)
-        .send({ appointment_date: date, appointment_time: '09:00' });
+        .send({ appointment_date: date, appointment_time: '09:00', service_type: 'corte' });
 
       assert.equal(bookResponse.status, 201);
       assert.equal(bookResponse.body.success, true);
@@ -167,14 +178,14 @@ if (!hasDatabase) {
       const first = await request(app)
         .post('/api/appointments')
         .set('Authorization', `Bearer ${clientToken}`)
-        .send({ appointment_date: date, appointment_time: '10:00' });
+        .send({ appointment_date: date, appointment_time: '10:00', service_type: 'corte' });
 
       assert.equal(first.status, 201);
 
       const second = await request(app)
         .post('/api/appointments')
         .set('Authorization', `Bearer ${clientToken}`)
-        .send({ appointment_date: date, appointment_time: '10:00' });
+        .send({ appointment_date: date, appointment_time: '10:00', service_type: 'corte' });
 
       assert.equal(second.status, 409);
       assert.equal(second.body.error.code, 'SLOT_ALREADY_BOOKED');
@@ -193,7 +204,7 @@ if (!hasDatabase) {
       const bookResponse = await request(app)
         .post('/api/appointments')
         .set('Authorization', `Bearer ${clientToken}`)
-        .send({ appointment_date: date, appointment_time: '11:00' });
+        .send({ appointment_date: date, appointment_time: '11:00', service_type: 'corte' });
 
       assert.equal(bookResponse.status, 201);
     });
@@ -219,7 +230,7 @@ if (!hasDatabase) {
       const bookResponse = await request(app)
         .post('/api/appointments')
         .set('Authorization', `Bearer ${clientToken}`)
-        .send({ appointment_date: date, appointment_time: '12:00' });
+        .send({ appointment_date: date, appointment_time: '12:00', service_type: 'corte' });
 
       assert.equal(bookResponse.status, 400);
       assert.equal(bookResponse.body.error.code, 'DAY_DISABLED');
@@ -253,7 +264,7 @@ if (!hasDatabase) {
       const bookResponse = await request(app)
         .post('/api/appointments')
         .set('Authorization', `Bearer ${clientToken}`)
-        .send({ appointment_date: date, appointment_time: pastTime });
+        .send({ appointment_date: date, appointment_time: pastTime, service_type: 'corte' });
 
       assert.equal(bookResponse.status, 400);
       assert.equal(bookResponse.body.error.code, 'PAST_APPOINTMENT');
@@ -268,7 +279,7 @@ if (!hasDatabase) {
         request(app)
           .post('/api/appointments')
           .set('Authorization', `Bearer ${clientToken}`)
-          .send({ appointment_date: date, appointment_time: '13:00' });
+          .send({ appointment_date: date, appointment_time: '13:00', service_type: 'corte' });
 
       const [first, second] = await Promise.all([call(), call()]);
       const statuses = [first.status, second.status].sort((a, b) => a - b);

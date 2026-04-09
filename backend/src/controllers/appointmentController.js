@@ -8,8 +8,10 @@ import { sendSuccess } from '../utils/apiResponse.js';
 import {
   requireFields,
   validateDate,
+  validateServiceType,
   validateTime,
 } from '../utils/validators.js';
+import { SERVICE_CATALOG, normalizeServiceType } from '../utils/serviceCatalog.js';
 
 export async function getMyAppointments(req, res, next) {
   try {
@@ -38,30 +40,43 @@ export async function createMyAppointment(req, res, next) {
   try {
     const appointmentDateRaw = req.body.appointment_date ?? req.body.appointmentDate;
     const appointmentTimeRaw = req.body.appointment_time ?? req.body.appointmentTime;
+    const serviceTypeRaw = req.body.service_type ?? req.body.serviceType;
 
-    if (!appointmentDateRaw || !appointmentTimeRaw) {
+    if (!appointmentDateRaw || !appointmentTimeRaw || !serviceTypeRaw) {
       requireFields(
         {
           appointment_date: appointmentDateRaw,
           appointment_time: appointmentTimeRaw,
+          service_type: serviceTypeRaw,
         },
-        ['appointment_date', 'appointment_time'],
+        ['appointment_date', 'appointment_time', 'service_type'],
       );
     }
 
     const appointmentDate = String(appointmentDateRaw).trim();
     const appointmentTime = String(appointmentTimeRaw).trim();
+    const serviceType = normalizeServiceType(serviceTypeRaw);
 
     validateDate(appointmentDate);
     validateTime(appointmentTime);
+    validateServiceType(serviceType);
 
     const appointment = await createAppointment({
       userId: req.user.id,
       appointmentDate,
       appointmentTime,
+      serviceType,
     });
 
     return sendSuccess(res, 201, { appointment });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getAppointmentServices(_req, res, next) {
+  try {
+    return sendSuccess(res, 200, { services: SERVICE_CATALOG });
   } catch (error) {
     return next(error);
   }

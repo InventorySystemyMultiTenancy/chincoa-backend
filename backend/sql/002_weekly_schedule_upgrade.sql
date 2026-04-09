@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS appointments (
   appointment_date DATE NOT NULL,
   appointment_time TIME NOT NULL,
   status TEXT NOT NULL DEFAULT 'agendado' CHECK (status IN ('agendado', 'pago', 'disponivel')),
-  price NUMERIC(10,2) NOT NULL DEFAULT 45.00,
+  price NUMERIC(10,2) NOT NULL DEFAULT 50.00,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -83,6 +83,22 @@ ALTER TABLE appointments
 ALTER TABLE appointments
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
+ALTER TABLE appointments
+  ADD COLUMN IF NOT EXISTS service_type TEXT;
+
+UPDATE appointments
+SET service_type = 'corte'
+WHERE service_type IS NULL;
+
+ALTER TABLE appointments
+  ALTER COLUMN service_type SET NOT NULL;
+
+ALTER TABLE appointments
+  ALTER COLUMN service_type SET DEFAULT 'corte';
+
+ALTER TABLE appointments
+  ALTER COLUMN price SET DEFAULT 50.00;
+
 DO $$
 BEGIN
   IF EXISTS (
@@ -102,6 +118,26 @@ ALTER TABLE appointments
 
 DO $$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'appointments_service_type_check'
+  ) THEN
+    ALTER TABLE appointments
+      ADD CONSTRAINT appointments_service_type_check
+      CHECK (
+        service_type IN (
+          'corte',
+          'sobrancelha',
+          'barba',
+          'sobrancelha_cabelo',
+          'cabelo_sobrancelha_barba',
+          'massagem_facial_toalha',
+          'completo'
+        )
+      ) NOT VALID;
+  END IF;
+
   IF NOT EXISTS (
     SELECT 1
     FROM pg_constraint

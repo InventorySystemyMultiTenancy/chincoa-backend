@@ -99,9 +99,24 @@ Se `ADMIN_EMAIL` e `ADMIN_PASSWORD` estiverem definidos, ao subir o servidor a A
 
 ### Cliente / autenticado
 
+- GET `/api/appointments/services`
 - GET `/api/appointments/me`
 - POST `/api/appointments`
 - DELETE `/api/appointments/:id` (dono ou admin)
+
+## Catalogo de servicos e precos
+
+O backend agora define o preco pelo `service_type` informado no agendamento.
+
+- `corte`: R$ 50
+- `sobrancelha`: R$ 5
+- `barba`: R$ 70
+- `sobrancelha_cabelo`: R$ 55
+- `cabelo_sobrancelha_barba`: R$ 70
+- `massagem_facial_toalha`: R$ 30
+- `completo`: R$ 100
+
+Use `GET /api/appointments/services` para obter a lista oficial.
 
 ### Admin
 
@@ -140,7 +155,8 @@ curl -X POST http://localhost:3001/api/appointments \
 	-H "Authorization: Bearer SEU_TOKEN" \
 	-d '{
 		"appointment_date": "2026-04-20",
-		"appointment_time": "14:00"
+		"appointment_time": "14:00",
+		"service_type": "corte"
 	}'
 ```
 
