@@ -390,6 +390,44 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
       return bookingValidation.existingAppointment;
     }
 
+    const legacyReusableSlot = await client.query(
+      `
+        UPDATE appointments
+        SET user_id = $1,
+            status = 'agendado',
+            price = $4,
+            updated_at = NOW()
+        WHERE appointment_date = $2
+          AND appointment_time = $3
+          AND status = 'disponivel'
+          AND user_id IS NULL
+        RETURNING id, user_id, appointment_date, appointment_time, status, price, created_at, updated_at
+      `,
+      [userId, appointmentDate, normalizedTime, DEFAULT_PRICE],
+    );
+
+    if (legacyReusableSlot.rowCount > 0) {
+      await client.query(
+        `
+          UPDATE business_hours
+          SET is_booked_week = true
+          WHERE weekday = $1 AND slot_time = $2
+        `,
+        [getWeekdayFromDate(appointmentDate), normalizedTime],
+      );
+
+      await client.query('COMMIT');
+
+      maybeDebugLog('post-legacy-slot-reused', {
+        userId,
+        date: appointmentDate,
+        time: normalizedTime,
+        appointmentId: legacyReusableSlot.rows[0].id,
+      });
+
+      return legacyReusableSlot.rows[0];
+    }
+
     const result = await client.query(
       `
         INSERT INTO appointments (user_id, appointment_date, appointment_time, status, price)

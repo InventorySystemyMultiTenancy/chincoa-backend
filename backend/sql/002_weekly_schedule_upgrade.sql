@@ -119,6 +119,37 @@ END $$;
 DROP INDEX IF EXISTS unique_appointment_slot;
 DROP INDEX IF EXISTS unique_active_appointment_slot;
 
+DO $$
+DECLARE
+  legacy_constraint RECORD;
+BEGIN
+  FOR legacy_constraint IN
+    SELECT conname
+    FROM pg_constraint
+    WHERE conrelid = 'appointments'::regclass
+      AND contype = 'u'
+      AND pg_get_constraintdef(oid) ILIKE 'UNIQUE (appointment_date, appointment_time)%'
+  LOOP
+    EXECUTE format('ALTER TABLE appointments DROP CONSTRAINT IF EXISTS %I', legacy_constraint.conname);
+  END LOOP;
+END $$;
+
+DO $$
+DECLARE
+  legacy_index RECORD;
+BEGIN
+  FOR legacy_index IN
+    SELECT indexname
+    FROM pg_indexes
+    WHERE schemaname = 'public'
+      AND tablename = 'appointments'
+      AND indexdef ILIKE 'CREATE UNIQUE INDEX%'
+      AND indexdef ILIKE '%(appointment_date, appointment_time)%'
+  LOOP
+    EXECUTE format('DROP INDEX IF EXISTS %I', legacy_index.indexname);
+  END LOOP;
+END $$;
+
 CREATE UNIQUE INDEX IF NOT EXISTS unique_appointment_reserved_slot
   ON appointments (appointment_date, appointment_time)
   WHERE status IN ('agendado', 'pago');
