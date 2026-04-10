@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS appointments (
       'sobrancelha_cabelo',
       'cabelo_sobrancelha_barba',
       'massagem_facial_toalha',
-      'completo'
+      'completo',
+      'servico_teste'
     )
   ),
   status TEXT NOT NULL DEFAULT 'agendado' CHECK (status IN ('agendado', 'pago', 'disponivel')),

@@ -8,6 +8,7 @@ export const SERVICE_CATALOG = Object.freeze([
   { key: 'cabelo_sobrancelha_barba', label: 'Cabelo, Sobrancelha e Barba', price: 70 },
   { key: 'massagem_facial_toalha', label: 'Massagem Facial (Toalha)', price: 30 },
   { key: 'completo', label: 'Completo (Tudo)', price: 100 },
+  { key: 'servico_teste', label: 'Servico Teste', price: 1 },
 ]);
 
 const SERVICE_PRICE_BY_KEY = new Map(SERVICE_CATALOG.map((service) => [service.key, service.price]));

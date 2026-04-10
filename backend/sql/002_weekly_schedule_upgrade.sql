@@ -166,7 +166,8 @@ BEGIN
           'sobrancelha_cabelo',
           'cabelo_sobrancelha_barba',
           'massagem_facial_toalha',
-          'completo'
+          'completo',
+          'servico_teste'
         )
       ) NOT VALID;
   END IF;

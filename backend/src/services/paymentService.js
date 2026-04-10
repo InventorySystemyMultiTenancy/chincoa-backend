@@ -375,7 +375,10 @@ async function fetchPointIntent({ token, paymentIntentId }) {
       token,
     });
   } catch (error) {
-    if (error.code === 'MERCADO_PAGO_REQUEST_FAILED' && error.details?.provider_status === 404) {
+    if (
+      error.code === 'MERCADO_PAGO_REQUEST_FAILED'
+      && (error.details?.provider_status === 404 || error.details?.provider_status === 400)
+    ) {
       return null;
     }
 
