@@ -2,13 +2,20 @@ import { AppError } from './appError.js';
 
 export const SERVICE_CATALOG = Object.freeze([
   { key: 'corte', label: 'Corte', price: 50 },
-  { key: 'sobrancelha', label: 'Sobrancelha', price: 5 },
-  { key: 'barba', label: 'Barba', price: 70 },
-  { key: 'sobrancelha_cabelo', label: 'Sobrancelha e Cabelo', price: 55 },
-  { key: 'cabelo_sobrancelha_barba', label: 'Cabelo, Sobrancelha e Barba', price: 70 },
-  { key: 'massagem_facial_toalha', label: 'Massagem Facial (Toalha)', price: 30 },
-  { key: 'completo', label: 'Completo (Tudo)', price: 100 },
-  { key: 'servico_teste', label: 'Servico Teste', price: 1 },
+  { key: 'barboterapia', label: 'Barboterapia', price: 40 },
+  { key: 'corte_barba', label: 'Corte & Barba', price: 85 },
+  { key: 'sobrancelha', label: 'Sobrancelha', price: 15 },
+  { key: 'raspado', label: 'Raspado', price: 25 },
+  { key: 'pezinho', label: 'Pezinho', price: 10 },
+  { key: 'penteado', label: 'Penteado', price: 25 },
+  { key: 'limpeza_pele', label: 'Limpeza de Pele', price: 30 },
+  { key: 'hidratacao', label: 'Hidratação', price: 25 },
+  { key: 'botox', label: 'Botox', price: 75 },
+  { key: 'progressiva', label: 'Progressiva', price: 75 },
+  { key: 'relaxamento', label: 'Relaxamento', price: 40 },
+  { key: 'luzes', label: 'Luzes', price: 90 },
+  { key: 'platinado', label: 'Platinado', price: 125 },
+  { key: 'coloracao', label: 'Coloração', price: 40 },
 ]);
 
 const SERVICE_PRICE_BY_KEY = new Map(SERVICE_CATALOG.map((service) => [service.key, service.price]));
@@ -20,7 +27,10 @@ export function normalizeServiceType(raw) {
   return String(raw || '')
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, '_');
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
 }
 
 export function getServicePrice(serviceType) {

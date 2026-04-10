@@ -95,27 +95,66 @@ UPDATE appointments
 SET service_type = CASE
   WHEN service_type IS NULL OR btrim(service_type) = '' THEN 'corte'
   WHEN lower(btrim(service_type)) = 'corte' THEN 'corte'
+  WHEN lower(btrim(service_type)) = 'barboterapia' THEN 'barboterapia'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'corte_barba',
+    'corte_e_barba',
+    'corte___barba'
+  ) THEN 'corte_barba'
   WHEN lower(btrim(service_type)) = 'sobrancelha' THEN 'sobrancelha'
-  WHEN lower(btrim(service_type)) = 'barba' THEN 'barba'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'raspado'
+  ) THEN 'raspado'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'pezinho'
+  ) THEN 'pezinho'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'penteado'
+  ) THEN 'penteado'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'limpeza_de_pele',
+    'limpeza_pele',
+    'massagem_facial_toalha',
+    'massagem_facial'
+  ) THEN 'limpeza_pele'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'hidratacao'
+  ) THEN 'hidratacao'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'botox'
+  ) THEN 'botox'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'progressiva'
+  ) THEN 'progressiva'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'relaxamento',
+    'barba',
+    'servico_teste'
+  ) THEN 'relaxamento'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'luzes'
+  ) THEN 'luzes'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'platinado'
+  ) THEN 'platinado'
+  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'coloracao'
+  ) THEN 'coloracao'
   WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
     'sobrancelha_cabelo',
     'sobrancelha_e_cabelo',
     'cabelo_sobrancelha',
     'cabelo_e_sobrancelha'
-  ) THEN 'sobrancelha_cabelo'
+  ) THEN 'corte'
   WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
     'cabelo_sobrancelha_barba',
     'cabelo_e_sobrancelha_e_barba',
     'barba_cabelo_sobrancelha',
-    'barba_e_cabelo_e_sobrancelha'
-  ) THEN 'cabelo_sobrancelha_barba'
-  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) LIKE 'massagem_facial%'
-    THEN 'massagem_facial_toalha'
-  WHEN lower(regexp_replace(btrim(service_type), '[^a-z0-9]+', '_', 'g')) IN (
+    'barba_e_cabelo_e_sobrancelha',
     'completo',
     'completo_tudo',
     'tudo'
-  ) THEN 'completo'
+  ) THEN 'corte_barba'
   ELSE 'corte'
 END;
 
@@ -161,13 +200,20 @@ BEGIN
       CHECK (
         service_type IN (
           'corte',
+          'barboterapia',
+          'corte_barba',
           'sobrancelha',
-          'barba',
-          'sobrancelha_cabelo',
-          'cabelo_sobrancelha_barba',
-          'massagem_facial_toalha',
-          'completo',
-          'servico_teste'
+          'raspado',
+          'pezinho',
+          'penteado',
+          'limpeza_pele',
+          'hidratacao',
+          'botox',
+          'progressiva',
+          'relaxamento',
+          'luzes',
+          'platinado',
+          'coloracao'
         )
       ) NOT VALID;
   END IF;

@@ -68,16 +68,24 @@ async function ensureSchema() {
       service_type TEXT NOT NULL DEFAULT 'corte' CHECK (
         service_type IN (
           'corte',
+          'barboterapia',
+          'corte_barba',
           'sobrancelha',
-          'barba',
-          'sobrancelha_cabelo',
-          'cabelo_sobrancelha_barba',
-          'massagem_facial_toalha',
-          'completo'
+          'raspado',
+          'pezinho',
+          'penteado',
+          'limpeza_pele',
+          'hidratacao',
+          'botox',
+          'progressiva',
+          'relaxamento',
+          'luzes',
+          'platinado',
+          'coloracao'
         )
       ),
       status TEXT NOT NULL DEFAULT 'agendado' CHECK (status IN ('agendado', 'pago', 'disponivel')),
-      price NUMERIC(10,2) NOT NULL DEFAULT 45.00,
+      price NUMERIC(10,2) NOT NULL DEFAULT 50.00,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       CONSTRAINT appointment_user_status_consistency CHECK (

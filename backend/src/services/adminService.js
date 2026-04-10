@@ -145,13 +145,20 @@ export async function updateAppointmentStatus({ appointmentId, status }) {
           service_type = CASE
             WHEN service_type IN (
               'corte',
+              'barboterapia',
+              'corte_barba',
               'sobrancelha',
-              'barba',
-              'sobrancelha_cabelo',
-              'cabelo_sobrancelha_barba',
-              'massagem_facial_toalha',
-              'completo',
-              'servico_teste'
+              'raspado',
+              'pezinho',
+              'penteado',
+              'limpeza_pele',
+              'hidratacao',
+              'botox',
+              'progressiva',
+              'relaxamento',
+              'luzes',
+              'platinado',
+              'coloracao'
             ) THEN service_type
             ELSE 'corte'
           END,
