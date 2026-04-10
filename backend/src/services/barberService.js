@@ -59,6 +59,25 @@ export async function createBarber({ fullName, imageUrl, isActive = true }) {
       [normalizedName, normalizeNullable(imageUrl), Boolean(isActive)],
     );
 
+    try {
+      await query(
+        `
+          INSERT INTO business_hours (weekday, slot_time, is_booked_week, barber_id)
+          SELECT base.weekday, base.slot_time, false, $1
+          FROM (
+            SELECT DISTINCT weekday, slot_time
+            FROM business_hours
+          ) base
+          ON CONFLICT (weekday, slot_time, barber_id) DO NOTHING
+        `,
+        [result.rows[0].id],
+      );
+    } catch (error) {
+      if (error.code !== '42703') {
+        throw error;
+      }
+    }
+
     return serializeBarber(result.rows[0]);
   } catch (error) {
     if (error.code === '23505') {

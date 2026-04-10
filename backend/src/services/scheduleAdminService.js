@@ -7,15 +7,21 @@ export async function listBusinessHours(weekday = null) {
 
   if (weekday !== null) {
     params.push(weekday);
-    where = 'WHERE weekday = $1';
+    where = 'WHERE bh.weekday = $1';
   }
 
   const result = await query(
     `
-      SELECT id, weekday, slot_time, is_booked_week, created_at
-      FROM business_hours
+      SELECT
+        MIN(bh.id) AS id,
+        bh.weekday,
+        bh.slot_time,
+        BOOL_OR(bh.is_booked_week) AS is_booked_week,
+        MIN(bh.created_at) AS created_at
+      FROM business_hours bh
       ${where}
-      ORDER BY weekday ASC, slot_time ASC
+      GROUP BY bh.weekday, bh.slot_time
+      ORDER BY bh.weekday ASC, bh.slot_time ASC
     `,
     params,
   );
@@ -27,27 +33,49 @@ export async function listBusinessHours(weekday = null) {
 }
 
 export async function createBusinessHour({ weekday, time }) {
-  try {
-    const result = await query(
-      `
-        INSERT INTO business_hours (weekday, slot_time)
-        VALUES ($1, $2)
-        RETURNING id, weekday, slot_time, is_booked_week, created_at
-      `,
-      [weekday, time],
-    );
+  const barbers = await query(
+    `
+      SELECT id
+      FROM barbers
+      WHERE is_active = true
+    `,
+  );
 
-    return {
-      ...result.rows[0],
-      time: String(result.rows[0].slot_time).slice(0, 5),
-    };
-  } catch (error) {
-    if (error.code === '23505') {
-      throw new AppError('Horario ja cadastrado para este dia da semana', 409, 'VALIDATION_ERROR');
-    }
-
-    throw error;
+  if (barbers.rowCount === 0) {
+    throw new AppError('Cadastre ao menos um barbeiro ativo antes de criar horarios', 400, 'NO_ACTIVE_BARBERS');
   }
+
+  await query(
+    `
+      INSERT INTO business_hours (weekday, slot_time, barber_id)
+      SELECT $1, $2, b.id
+      FROM barbers b
+      WHERE b.is_active = true
+      ON CONFLICT (weekday, slot_time, barber_id) DO NOTHING
+    `,
+    [weekday, time],
+  );
+
+  const result = await query(
+    `
+      SELECT
+        MIN(id) AS id,
+        weekday,
+        slot_time,
+        BOOL_OR(is_booked_week) AS is_booked_week,
+        MIN(created_at) AS created_at
+      FROM business_hours
+      WHERE weekday = $1 AND slot_time = $2
+      GROUP BY weekday, slot_time
+      LIMIT 1
+    `,
+    [weekday, time],
+  );
+
+  return {
+    ...result.rows[0],
+    time: String(result.rows[0].slot_time).slice(0, 5),
+  };
 }
 
 export async function updateBusinessHour({ id, weekday, time }) {
@@ -68,38 +96,61 @@ export async function updateBusinessHour({ id, weekday, time }) {
   const nextWeekday = weekday ?? existing.weekday;
   const nextTime = time ?? String(existing.slot_time).slice(0, 5);
 
-  try {
-    const result = await query(
-      `
-        UPDATE business_hours
-        SET weekday = $2, slot_time = $3
-        WHERE id = $1
-        RETURNING id, weekday, slot_time, is_booked_week, created_at
-      `,
-      [id, nextWeekday, nextTime],
-    );
+  await query(
+    `
+      UPDATE business_hours
+      SET weekday = $3, slot_time = $4
+      WHERE weekday = $1 AND slot_time = $2
+    `,
+    [existing.weekday, String(existing.slot_time).slice(0, 5), nextWeekday, nextTime],
+  );
 
-    return {
-      ...result.rows[0],
-      time: String(result.rows[0].slot_time).slice(0, 5),
-    };
-  } catch (error) {
-    if (error.code === '23505') {
-      throw new AppError('Ja existe esse horario para o dia da semana informado', 409, 'VALIDATION_ERROR');
-    }
+  const result = await query(
+    `
+      SELECT
+        MIN(id) AS id,
+        weekday,
+        slot_time,
+        BOOL_OR(is_booked_week) AS is_booked_week,
+        MIN(created_at) AS created_at
+      FROM business_hours
+      WHERE weekday = $1 AND slot_time = $2
+      GROUP BY weekday, slot_time
+      LIMIT 1
+    `,
+    [nextWeekday, nextTime],
+  );
 
-    throw error;
-  }
+  return {
+    ...result.rows[0],
+    time: String(result.rows[0].slot_time).slice(0, 5),
+  };
 }
 
 export async function deleteBusinessHour(id) {
+  const current = await query(
+    `
+      SELECT id, weekday, slot_time
+      FROM business_hours
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [id],
+  );
+
+  if (current.rowCount === 0) {
+    throw new AppError('Horario nao encontrado', 404, 'NOT_FOUND');
+  }
+
+  const existing = current.rows[0];
+
   const result = await query(
     `
       DELETE FROM business_hours
-      WHERE id = $1
+      WHERE weekday = $1 AND slot_time = $2
       RETURNING id
     `,
-    [id],
+    [existing.weekday, String(existing.slot_time).slice(0, 5)],
   );
 
   if (result.rowCount === 0) {

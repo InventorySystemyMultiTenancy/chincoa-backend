@@ -50,15 +50,15 @@ async function getDayOverride(dateString) {
   return result.rowCount > 0 ? result.rows[0] : null;
 }
 
-async function getHoursByWeekday(weekday) {
+async function getHoursByWeekday(weekday, barberId) {
   const result = await query(
     `
-      SELECT id, weekday, slot_time
+      SELECT id, weekday, slot_time, is_booked_week
       FROM business_hours
-      WHERE weekday = $1
+      WHERE weekday = $1 AND barber_id = $2
       ORDER BY slot_time ASC
     `,
-    [weekday],
+    [weekday, barberId],
   );
 
   return result.rows;
@@ -135,6 +135,15 @@ function getSlotDecision({ dateString, timeString, dayOverride, hour, existing }
       status: 'desabilitado',
       reason: 'Horario nao cadastrado para este dia da semana',
       code: 'SLOT_DISABLED',
+      timeContext,
+    };
+  }
+
+  if (hour.is_booked_week) {
+    return {
+      status: existing?.status || 'agendado',
+      reason: 'Horario ja agendado nesta semana',
+      code: 'SLOT_ALREADY_BOOKED',
       timeContext,
     };
   }
@@ -270,13 +279,13 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
 
   const hourResult = await client.query(
     `
-      SELECT id, weekday, slot_time
+      SELECT id, weekday, slot_time, is_booked_week
       FROM business_hours
-      WHERE weekday = $1 AND slot_time = $2
+      WHERE weekday = $1 AND slot_time = $2 AND barber_id = $3
       LIMIT 1
       FOR UPDATE
     `,
-    [weekday, normalizedTime],
+    [weekday, normalizedTime, barberId],
   );
 
   const hour = hourResult.rowCount > 0 ? hourResult.rows[0] : null;
@@ -326,6 +335,7 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
     throw new AppError('Horario ja reservado', 409, 'SLOT_ALREADY_BOOKED', {
       date: dateString,
       time: normalizedTime,
+      byWeeklyFlag: Boolean(hour?.is_booked_week),
       barber_id: barberId,
       existingAppointmentId: existing?.id || null,
       existingStatus: existing?.status || null,
@@ -405,7 +415,7 @@ export async function listSlotsByDate(appointmentDate, barberId) {
 
   const [dayOverride, hours, booked] = await Promise.all([
     getDayOverride(appointmentDate),
-    getHoursByWeekday(weekday),
+    getHoursByWeekday(weekday, barberId),
     getBookedAppointmentsByDate(appointmentDate, barberId),
   ]);
 
@@ -556,6 +566,15 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
     );
 
     if (legacyReusableSlot.rowCount > 0) {
+      await client.query(
+        `
+          UPDATE business_hours
+          SET is_booked_week = true
+          WHERE barber_id = $1 AND weekday = $2 AND slot_time = $3
+        `,
+        [barberId, getWeekdayFromDate(appointmentDate), normalizedTime],
+      );
+
       await client.query('COMMIT');
 
       maybeDebugLog('post-legacy-slot-reused', {
@@ -579,6 +598,15 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
         RETURNING id, user_id, barber_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
       `,
       [userId, barberId, appointmentDate, normalizedTime, normalizedServiceType, pricing.finalPrice],
+    );
+
+    await client.query(
+      `
+        UPDATE business_hours
+        SET is_booked_week = true
+        WHERE barber_id = $1 AND weekday = $2 AND slot_time = $3
+      `,
+      [barberId, getWeekdayFromDate(appointmentDate), normalizedTime],
     );
 
     await client.query('COMMIT');
@@ -662,7 +690,7 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
 export async function deleteAppointmentByOwnerOrAdmin({ appointmentId, user }) {
   const result = await query(
     `
-      SELECT id, user_id, status, appointment_date, appointment_time
+      SELECT id, user_id, barber_id, status, appointment_date, appointment_time
       FROM appointments
       WHERE id = $1
     `,
@@ -682,6 +710,17 @@ export async function deleteAppointmentByOwnerOrAdmin({ appointmentId, user }) {
 
   if (user.role !== 'admin' && appointment.status === 'pago') {
     throw new AppError('Nao e permitido cancelar agendamento pago', 400, 'PAID_APPOINTMENT_CANNOT_CANCEL');
+  }
+
+  if (appointment.barber_id) {
+    await query(
+      `
+        UPDATE business_hours
+        SET is_booked_week = false
+        WHERE barber_id = $1 AND weekday = $2 AND slot_time = $3
+      `,
+      [appointment.barber_id, getWeekdayFromDate(appointment.appointment_date), normalizeTime(appointment.appointment_time)],
+    );
   }
 
   await query(
