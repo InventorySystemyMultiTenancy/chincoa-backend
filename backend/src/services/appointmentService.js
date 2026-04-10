@@ -2,7 +2,6 @@ import { pool, query } from '../db/pool.js';
 import { AppError } from '../utils/appError.js';
 import { isPastSlotByBusinessTimezone } from '../utils/validators.js';
 import { getRollingWindowByBusinessTimezone, runRollingScheduleMaintenance } from './rollingScheduleMaintenanceService.js';
-import { resetWeeklyBookingFlagsIfNeeded } from './weeklyResetService.js';
 import { assertValidServiceType, getServiceLabel, getServicePrice } from '../utils/serviceCatalog.js';
 
 const DEFAULT_PRICE = getServicePrice('corte') || 50;
@@ -30,7 +29,7 @@ async function getDayOverride(dateString) {
 async function getHoursByWeekday(weekday) {
   const result = await query(
     `
-      SELECT id, weekday, slot_time, is_booked_week
+      SELECT id, weekday, slot_time
       FROM business_hours
       WHERE weekday = $1
       ORDER BY slot_time ASC
@@ -41,14 +40,32 @@ async function getHoursByWeekday(weekday) {
   return result.rows;
 }
 
-async function getBookedAppointmentsByDate(dateString) {
+async function assertActiveBarberExists(barberId) {
   const result = await query(
     `
-      SELECT id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
-      FROM appointments
-      WHERE appointment_date = $1 AND status IN ('agendado', 'pago')
+      SELECT id, full_name, image_url
+      FROM barbers
+      WHERE id = $1 AND is_active = true
+      LIMIT 1
     `,
-    [dateString],
+    [barberId],
+  );
+
+  if (result.rowCount === 0) {
+    throw new AppError('Barbeiro nao encontrado ou inativo', 404, 'BARBER_NOT_FOUND');
+  }
+
+  return result.rows[0];
+}
+
+async function getBookedAppointmentsByDate(dateString, barberId) {
+  const result = await query(
+    `
+      SELECT id, user_id, barber_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
+      FROM appointments
+      WHERE appointment_date = $1 AND barber_id = $2 AND status IN ('agendado', 'pago')
+    `,
+    [dateString, barberId],
   );
 
   return result.rows;
@@ -98,15 +115,6 @@ function getSlotDecision({ dateString, timeString, dayOverride, hour, existing }
     };
   }
 
-  if (hour.is_booked_week) {
-    return {
-      status: existing?.status || 'agendado',
-      reason: 'Horario ja agendado nesta semana',
-      code: 'SLOT_ALREADY_BOOKED',
-      timeContext,
-    };
-  }
-
   if (!existing) {
     return {
       status: 'disponivel',
@@ -139,6 +147,13 @@ function serializeAppointment(row) {
     service_type: row.service_type,
     service_label: getServiceLabel(row.service_type),
     price: Number(row.price),
+    barber: row.barber_id
+      ? {
+          id: row.barber_id,
+          full_name: row.barber_name || null,
+          image_url: row.barber_image_url || null,
+        }
+      : null,
   };
 }
 
@@ -202,7 +217,7 @@ async function resolveAppointmentPricing({ client, userId, appointmentDate, serv
   };
 }
 
-async function assertSlotEnabledForBookingWithClient(client, dateString, timeString, userId) {
+async function assertSlotEnabledForBookingWithClient(client, dateString, timeString, userId, barberId) {
   const normalizedTime = normalizeTime(timeString);
 
   const dayOverrideResult = await client.query(
@@ -231,7 +246,7 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
 
   const hourResult = await client.query(
     `
-      SELECT id, weekday, slot_time, is_booked_week
+      SELECT id, weekday, slot_time
       FROM business_hours
       WHERE weekday = $1 AND slot_time = $2
       LIMIT 1
@@ -244,13 +259,13 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
 
   const existingResult = await client.query(
     `
-      SELECT id, user_id, appointment_date, appointment_time, service_type, status, price
+      SELECT id, user_id, barber_id, appointment_date, appointment_time, service_type, status, price
       FROM appointments
-      WHERE appointment_date = $1 AND appointment_time = $2 AND status IN ('agendado', 'pago')
+      WHERE appointment_date = $1 AND appointment_time = $2 AND barber_id = $3 AND status IN ('agendado', 'pago')
       LIMIT 1
       FOR UPDATE
     `,
-    [dateString, normalizedTime],
+    [dateString, normalizedTime, barberId],
   );
 
   const existing = existingResult.rowCount > 0 ? existingResult.rows[0] : null;
@@ -287,7 +302,7 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
     throw new AppError('Horario ja reservado', 409, 'SLOT_ALREADY_BOOKED', {
       date: dateString,
       time: normalizedTime,
-      byWeeklyFlag: Boolean(hour?.is_booked_week),
+      barber_id: barberId,
       existingAppointmentId: existing?.id || null,
       existingStatus: existing?.status || null,
       existingServiceType: existing?.service_type || null,
@@ -318,8 +333,21 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
 export async function listMyAppointments(userId) {
   const result = await query(
     `
-      SELECT id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
-      FROM appointments
+      SELECT
+        a.id,
+        a.user_id,
+        a.barber_id,
+        b.full_name AS barber_name,
+        b.image_url AS barber_image_url,
+        a.appointment_date,
+        a.appointment_time,
+        a.service_type,
+        a.status,
+        a.price,
+        a.created_at,
+        a.updated_at
+      FROM appointments a
+      LEFT JOIN barbers b ON b.id = a.barber_id
       WHERE user_id = $1 AND status IN ('agendado', 'pago')
       ORDER BY appointment_date DESC, appointment_time DESC
     `,
@@ -329,9 +357,9 @@ export async function listMyAppointments(userId) {
   return result.rows.map(serializeAppointment);
 }
 
-export async function listSlotsByDate(appointmentDate) {
+export async function listSlotsByDate(appointmentDate, barberId) {
   await runRollingScheduleMaintenance();
-  await resetWeeklyBookingFlagsIfNeeded();
+  const barber = await assertActiveBarberExists(barberId);
 
   const weekday = getWeekdayFromDate(appointmentDate);
   const nowContext = isPastSlotByBusinessTimezone(appointmentDate, '00:00');
@@ -354,7 +382,7 @@ export async function listSlotsByDate(appointmentDate) {
   const [dayOverride, hours, booked] = await Promise.all([
     getDayOverride(appointmentDate),
     getHoursByWeekday(weekday),
-    getBookedAppointmentsByDate(appointmentDate),
+    getBookedAppointmentsByDate(appointmentDate, barberId),
   ]);
 
   const bookedByTime = new Map(
@@ -384,6 +412,7 @@ export async function listSlotsByDate(appointmentDate) {
         id: hour.id,
         appointment_id: null,
         user_id: null,
+        barber_id: barber.id,
         appointment_date: appointmentDate,
         appointment_time: time,
         status: 'desabilitado',
@@ -397,6 +426,7 @@ export async function listSlotsByDate(appointmentDate) {
         id: hour.id,
         appointment_id: null,
         user_id: null,
+        barber_id: barber.id,
         appointment_date: appointmentDate,
         appointment_time: time,
         status: 'disponivel',
@@ -409,13 +439,14 @@ export async function listSlotsByDate(appointmentDate) {
       id: hour.id,
       appointment_id: existing?.id || null,
       user_id: existing?.user_id || null,
+      barber_id: existing?.barber_id || barber.id,
       appointment_date: existing?.appointment_date || appointmentDate,
       appointment_time: normalizeTime(existing?.appointment_time || time),
       service_type: existing?.service_type || null,
       service_label: existing?.service_type ? getServiceLabel(existing.service_type) : null,
       status: existing?.status || 'agendado',
       price: Number(existing?.price || DEFAULT_PRICE),
-      reason: existing ? null : 'Horario ja reservado nesta semana',
+      reason: existing ? null : 'Horario ja reservado',
     };
   });
 
@@ -428,13 +459,18 @@ export async function listSlotsByDate(appointmentDate) {
       booking_window_start: window.bookingStartDate,
       booking_window_end: window.bookingEndDate,
       retention_start: window.retentionStartDate,
+      barber: {
+        id: barber.id,
+        full_name: barber.full_name,
+        image_url: barber.image_url,
+      },
     },
   };
 }
 
-export async function createAppointment({ userId, appointmentDate, appointmentTime, serviceType }) {
+export async function createAppointment({ userId, appointmentDate, appointmentTime, serviceType, barberId }) {
   await runRollingScheduleMaintenance();
-  await resetWeeklyBookingFlagsIfNeeded();
+  await assertActiveBarberExists(barberId);
 
   const normalizedTime = normalizeTime(appointmentTime);
   const normalizedServiceType = assertValidServiceType(serviceType);
@@ -444,7 +480,7 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
   try {
     await client.query('BEGIN');
     await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
-      `appointment_slot:${appointmentDate}:${normalizedTime}`,
+      `appointment_slot:${appointmentDate}:${normalizedTime}:${barberId}`,
     ]);
 
     const bookingValidation = await assertSlotEnabledForBookingWithClient(
@@ -452,6 +488,7 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
       appointmentDate,
       normalizedTime,
       userId,
+      barberId,
     );
 
     const pricing = await resolveAppointmentPricing({
@@ -468,6 +505,7 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
         userId,
         date: appointmentDate,
         time: normalizedTime,
+        barberId,
         appointmentId: bookingValidation.existingAppointment.id,
       });
 
@@ -481,32 +519,26 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
             service_type = $4,
             status = 'agendado',
             price = $5,
+            barber_id = $6,
             updated_at = NOW()
         WHERE appointment_date = $2
           AND appointment_time = $3
+          AND (barber_id = $6 OR barber_id IS NULL)
           AND status = 'disponivel'
           AND user_id IS NULL
-        RETURNING id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
+        RETURNING id, user_id, barber_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
       `,
-      [userId, appointmentDate, normalizedTime, normalizedServiceType, pricing.finalPrice],
+      [userId, appointmentDate, normalizedTime, normalizedServiceType, pricing.finalPrice, barberId],
     );
 
     if (legacyReusableSlot.rowCount > 0) {
-      await client.query(
-        `
-          UPDATE business_hours
-          SET is_booked_week = true
-          WHERE weekday = $1 AND slot_time = $2
-        `,
-        [getWeekdayFromDate(appointmentDate), normalizedTime],
-      );
-
       await client.query('COMMIT');
 
       maybeDebugLog('post-legacy-slot-reused', {
         userId,
         date: appointmentDate,
         time: normalizedTime,
+        barberId,
         appointmentId: legacyReusableSlot.rows[0].id,
       });
 
@@ -518,20 +550,11 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
 
     const result = await client.query(
       `
-        INSERT INTO appointments (user_id, appointment_date, appointment_time, service_type, status, price)
-        VALUES ($1, $2, $3, $4, 'agendado', $5)
-        RETURNING id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
+        INSERT INTO appointments (user_id, barber_id, appointment_date, appointment_time, service_type, status, price)
+        VALUES ($1, $2, $3, $4, $5, 'agendado', $6)
+        RETURNING id, user_id, barber_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
       `,
-      [userId, appointmentDate, normalizedTime, normalizedServiceType, pricing.finalPrice],
-    );
-
-    await client.query(
-      `
-        UPDATE business_hours
-        SET is_booked_week = true
-        WHERE weekday = $1 AND slot_time = $2
-      `,
-      [getWeekdayFromDate(appointmentDate), normalizedTime],
+      [userId, barberId, appointmentDate, normalizedTime, normalizedServiceType, pricing.finalPrice],
     );
 
     await client.query('COMMIT');
@@ -540,6 +563,7 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
       userId,
       date: appointmentDate,
       time: normalizedTime,
+      barberId,
       appointmentId: result.rows[0].id,
     });
 
@@ -555,10 +579,10 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
         `
           SELECT id, user_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
           FROM appointments
-          WHERE appointment_date = $1 AND appointment_time = $2 AND status IN ('agendado', 'pago')
+          WHERE appointment_date = $1 AND appointment_time = $2 AND barber_id = $3 AND status IN ('agendado', 'pago')
           LIMIT 1
         `,
-        [appointmentDate, normalizedTime],
+        [appointmentDate, normalizedTime, barberId],
       );
 
       if (existingAfterConflict.rowCount > 0) {
@@ -568,6 +592,7 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
           userId,
           date: appointmentDate,
           time: normalizedTime,
+          barberId,
           conflictAppointmentId: conflictRow.id,
           conflictUserId: conflictRow.user_id,
           conflictStatus: conflictRow.status,
@@ -580,6 +605,7 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
         throw new AppError('Horario ja reservado', 409, 'SLOT_ALREADY_BOOKED', {
           date: appointmentDate,
           time: normalizedTime,
+          barber_id: barberId,
           source: 'db_unique_index',
           conflictAppointmentId: conflictRow.id,
           conflictStatus: conflictRow.status,
@@ -590,6 +616,7 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
         userId,
         date: appointmentDate,
         time: normalizedTime,
+        barberId,
         postgresCode: error.code,
         detail: error.detail,
       });
@@ -597,6 +624,7 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
       throw new AppError('Horario ja reservado', 409, 'SLOT_ALREADY_BOOKED', {
         date: appointmentDate,
         time: normalizedTime,
+        barber_id: barberId,
         source: 'db_unique_index',
       });
     }
@@ -631,15 +659,6 @@ export async function deleteAppointmentByOwnerOrAdmin({ appointmentId, user }) {
   if (user.role !== 'admin' && appointment.status === 'pago') {
     throw new AppError('Nao e permitido cancelar agendamento pago', 400, 'PAID_APPOINTMENT_CANNOT_CANCEL');
   }
-
-  await query(
-    `
-      UPDATE business_hours
-      SET is_booked_week = false
-      WHERE weekday = $1 AND slot_time = $2
-    `,
-    [getWeekdayFromDate(appointment.appointment_date), normalizeTime(appointment.appointment_time)],
-  );
 
   await query(
     `

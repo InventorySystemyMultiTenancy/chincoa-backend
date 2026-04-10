@@ -5,6 +5,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const PHONE_DIGITS_REGEX = /^\d{10,15}$/;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DEFAULT_BUSINESS_TIMEZONE = 'America/Sao_Paulo';
 
 export function getNowByBusinessTimezone() {
@@ -138,6 +139,12 @@ export function validateWeekday(weekday) {
 export function validateRole(role) {
   if (!['admin', 'client'].includes(role)) {
     throw new AppError('Role invalida', 400, 'VALIDATION_ERROR');
+  }
+}
+
+export function validateUuid(value, fieldName = 'id') {
+  if (!UUID_REGEX.test(String(value || '').trim())) {
+    throw new AppError(`${fieldName} invalido`, 400, 'VALIDATION_ERROR');
   }
 }
 

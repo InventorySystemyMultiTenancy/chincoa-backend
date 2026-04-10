@@ -6,11 +6,6 @@ function normalizeTime(value) {
   return String(value).slice(0, 5);
 }
 
-function getWeekdayFromDate(dateString) {
-  const date = new Date(`${dateString}T00:00:00`);
-  return date.getDay();
-}
-
 export async function listAppointmentsByDate(date) {
   const params = [];
   let whereClause = '';
@@ -28,6 +23,9 @@ export async function listAppointmentsByDate(date) {
         u.full_name,
         u.email,
         u.phone,
+        a.barber_id,
+        b.full_name AS barber_name,
+        b.image_url AS barber_image_url,
         a.appointment_date,
         a.appointment_time,
         a.service_type,
@@ -37,6 +35,7 @@ export async function listAppointmentsByDate(date) {
         a.updated_at
       FROM appointments a
       LEFT JOIN users u ON u.id = a.user_id
+      LEFT JOIN barbers b ON b.id = a.barber_id
       ${whereClause}
       ORDER BY a.appointment_date ASC, a.appointment_time ASC
     `,
@@ -48,6 +47,13 @@ export async function listAppointmentsByDate(date) {
     appointment_time: normalizeTime(row.appointment_time),
     service_label: getServiceLabel(row.service_type),
     price: Number(row.price),
+    barber: row.barber_id
+      ? {
+          id: row.barber_id,
+          full_name: row.barber_name || null,
+          image_url: row.barber_image_url || null,
+        }
+      : null,
   }));
 }
 
@@ -72,15 +78,6 @@ export async function updateAppointmentStatus({ appointmentId, status }) {
   }
 
   if (status === 'disponivel') {
-    await query(
-      `
-        UPDATE business_hours
-        SET is_booked_week = false
-        WHERE weekday = $1 AND slot_time = $2
-      `,
-      [getWeekdayFromDate(slot.appointment_date), normalizeTime(slot.appointment_time)],
-    );
-
     await query(
       `
         DELETE FROM appointments
@@ -166,15 +163,6 @@ export async function updateAppointmentStatus({ appointmentId, status }) {
     throw new AppError('Agendamento nao encontrado', 404, 'APPOINTMENT_NOT_FOUND');
   }
 
-  await query(
-    `
-      UPDATE business_hours
-      SET is_booked_week = true
-      WHERE weekday = $1 AND slot_time = $2
-    `,
-    [getWeekdayFromDate(slot.appointment_date), normalizeTime(slot.appointment_time)],
-  );
-
   return {
     ...result.rows[0],
     appointment_time: normalizeTime(result.rows[0].appointment_time),
@@ -198,15 +186,6 @@ export async function deleteAppointmentAsAdmin(appointmentId) {
   }
 
   const appointment = current.rows[0];
-
-  await query(
-    `
-      UPDATE business_hours
-      SET is_booked_week = false
-      WHERE weekday = $1 AND slot_time = $2
-    `,
-    [getWeekdayFromDate(appointment.appointment_date), normalizeTime(appointment.appointment_time)],
-  );
 
   const result = await query(
     `

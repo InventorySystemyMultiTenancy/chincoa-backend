@@ -10,6 +10,7 @@ import {
   validateDate,
   validateServiceType,
   validateTime,
+  validateUuid,
 } from '../utils/validators.js';
 import { SERVICE_CATALOG, normalizeServiceType } from '../utils/serviceCatalog.js';
 
@@ -24,12 +25,14 @@ export async function getMyAppointments(req, res, next) {
 
 export async function getSlotsByDate(req, res, next) {
   try {
-    requireFields(req.query, ['date']);
+    requireFields(req.query, ['date', 'barber_id']);
 
     const date = String(req.query.date).trim();
+    const barberId = String(req.query.barber_id).trim();
     validateDate(date);
+    validateUuid(barberId, 'barber_id');
 
-    const { slots, meta } = await listSlotsByDate(date);
+    const { slots, meta } = await listSlotsByDate(date, barberId);
     return sendSuccess(res, 200, { slots, meta });
   } catch (error) {
     return next(error);
@@ -41,31 +44,36 @@ export async function createMyAppointment(req, res, next) {
     const appointmentDateRaw = req.body.appointment_date ?? req.body.appointmentDate;
     const appointmentTimeRaw = req.body.appointment_time ?? req.body.appointmentTime;
     const serviceTypeRaw = req.body.service_type ?? req.body.serviceType;
+    const barberIdRaw = req.body.barber_id ?? req.body.barberId;
 
-    if (!appointmentDateRaw || !appointmentTimeRaw || !serviceTypeRaw) {
+    if (!appointmentDateRaw || !appointmentTimeRaw || !serviceTypeRaw || !barberIdRaw) {
       requireFields(
         {
           appointment_date: appointmentDateRaw,
           appointment_time: appointmentTimeRaw,
           service_type: serviceTypeRaw,
+          barber_id: barberIdRaw,
         },
-        ['appointment_date', 'appointment_time', 'service_type'],
+        ['appointment_date', 'appointment_time', 'service_type', 'barber_id'],
       );
     }
 
     const appointmentDate = String(appointmentDateRaw).trim();
     const appointmentTime = String(appointmentTimeRaw).trim();
     const serviceType = normalizeServiceType(serviceTypeRaw);
+    const barberId = String(barberIdRaw).trim();
 
     validateDate(appointmentDate);
     validateTime(appointmentTime);
     validateServiceType(serviceType);
+    validateUuid(barberId, 'barber_id');
 
     const appointment = await createAppointment({
       userId: req.user.id,
       appointmentDate,
       appointmentTime,
       serviceType,
+      barberId,
     });
 
     return sendSuccess(res, 201, { appointment });
