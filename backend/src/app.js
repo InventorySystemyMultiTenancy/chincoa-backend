@@ -4,6 +4,7 @@ import express from 'express';
 import adminRoutes from './routes/adminRoutes.js';
 import appointmentRoutes from './routes/appointmentRoutes.js';
 import authRoutes from './routes/authRoutes.js';
+import barberRoutes from './routes/barberRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
 import paymentRoutes from './routes/paymentRoutes.js';
 import { errorHandler, notFoundHandler } from './middlewares/errorMiddleware.js';
@@ -39,7 +40,9 @@ app.use(
   }),
 );
 
-app.use(express.json());
+const requestBodyLimit = String(process.env.REQUEST_BODY_LIMIT || '10mb').trim() || '10mb';
+app.use(express.json({ limit: requestBodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: requestBodyLimit }));
 
 if (appointmentDebugLogs) {
   app.use((req, res, next) => {
@@ -79,6 +82,7 @@ if (appointmentDebugLogs) {
 
 app.use('/api', healthRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/barbers', barberRoutes);
 app.use('/api/appointments', appointmentRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/payment', paymentRoutes);

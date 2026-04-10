@@ -1,6 +1,10 @@
 import { Router } from 'express';
 
 import {
+  deleteAdminBarber,
+  getAdminBarbers,
+  patchAdminBarber,
+  postAdminBarber,
   getFinancialReportSummary,
   getFixedExpenses,
   getScheduleDays,
@@ -27,6 +31,11 @@ router.use(requireAuth, requireAdmin);
 router.get('/appointments', listAppointments);
 router.patch('/appointments/:id/status', patchAppointmentStatus);
 router.delete('/appointments/:id', removeAppointment);
+
+router.get('/barbers', getAdminBarbers);
+router.post('/barbers', postAdminBarber);
+router.patch('/barbers/:id', patchAdminBarber);
+router.delete('/barbers/:id', deleteAdminBarber);
 
 router.get('/reports/financial', getFinancialReportSummary);
 
