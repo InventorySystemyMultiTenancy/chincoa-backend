@@ -7,6 +7,7 @@ import {
   createPixPayment,
   createPointPayment,
   getSubscriptionStatus,
+  listPublicSubscriptionPlans,
   processIpnNotification,
   processWebhookNotification,
 } from '../services/paymentService.js';
@@ -140,9 +141,11 @@ export function postMercadoPagoWebhook(req, res, _next) {
 
 export async function postCreateSubscriptionPlan(req, res, next) {
   try {
-    requireFields(req.body, ['transaction_amount']);
+    requireFields(req.body, ['name', 'transaction_amount']);
 
     const result = await createSubscriptionPlan({
+      name: req.body.name,
+      description: req.body.description,
       reason: req.body.reason,
       transactionAmount: req.body.transaction_amount,
       frequency: req.body.frequency,
@@ -155,6 +158,15 @@ export async function postCreateSubscriptionPlan(req, res, next) {
     });
 
     return sendSuccess(res, 201, result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getPublicSubscriptionPlans(req, res, next) {
+  try {
+    const plans = await listPublicSubscriptionPlans();
+    return sendSuccess(res, 200, { plans });
   } catch (error) {
     return next(error);
   }

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import {
+  getPublicSubscriptionPlans,
   getSubscription,
   getStatus,
   postCancelSubscription,
@@ -21,6 +22,7 @@ router.use(resolvePaymentStore);
 
 router.post('/ipn/mercadopago', postMercadoPagoIpn);
 router.post('/webhooks/mercadopago', postMercadoPagoWebhook);
+router.get('/subscriptions/plans/public', getPublicSubscriptionPlans);
 
 router.post('/create-pix', requireAuth, postCreatePix);
 router.post('/create-point', requireAuth, postCreatePoint);

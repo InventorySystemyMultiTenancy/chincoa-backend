@@ -4,12 +4,15 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE TABLE IF NOT EXISTS subscription_plans (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   mp_plan_id TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT,
   reason TEXT,
   frequency INTEGER NOT NULL,
   frequency_type TEXT NOT NULL CHECK (frequency_type IN ('days', 'months')),
   transaction_amount NUMERIC(10,2) NOT NULL,
   currency_id TEXT NOT NULL DEFAULT 'BRL',
   back_url TEXT,
+  is_active BOOLEAN NOT NULL DEFAULT true,
   status TEXT NOT NULL DEFAULT 'authorized',
   created_by UUID REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -18,6 +21,9 @@ CREATE TABLE IF NOT EXISTS subscription_plans (
 
 CREATE INDEX IF NOT EXISTS idx_subscription_plans_status
   ON subscription_plans (status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_plans_active
+  ON subscription_plans (is_active, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

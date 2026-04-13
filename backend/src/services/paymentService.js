@@ -506,12 +506,15 @@ async function registerNotification({ source, notificationKey, topic, resourceId
 
 async function upsertSubscriptionPlan({
   mpPlanId,
+  name,
+  description,
   reason,
   frequency,
   frequencyType,
   transactionAmount,
   currencyId,
   backUrl,
+  isActive,
   status,
   createdBy,
 }) {
@@ -519,35 +522,44 @@ async function upsertSubscriptionPlan({
     `
       INSERT INTO subscription_plans (
         mp_plan_id,
+        name,
+        description,
         reason,
         frequency,
         frequency_type,
         transaction_amount,
         currency_id,
         back_url,
+        is_active,
         status,
         created_by
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       ON CONFLICT (mp_plan_id)
       DO UPDATE SET
+        name = EXCLUDED.name,
+        description = EXCLUDED.description,
         reason = EXCLUDED.reason,
         frequency = EXCLUDED.frequency,
         frequency_type = EXCLUDED.frequency_type,
         transaction_amount = EXCLUDED.transaction_amount,
         currency_id = EXCLUDED.currency_id,
         back_url = EXCLUDED.back_url,
+        is_active = EXCLUDED.is_active,
         status = EXCLUDED.status,
         updated_at = NOW()
       RETURNING
         id,
         mp_plan_id,
+        name,
+        description,
         reason,
         frequency,
         frequency_type,
         transaction_amount,
         currency_id,
         back_url,
+        is_active,
         status,
         created_by,
         created_at,
@@ -555,18 +567,94 @@ async function upsertSubscriptionPlan({
     `,
     [
       mpPlanId,
+      String(name || reason || 'Plano mensal').trim(),
+      normalizeNullable(description),
       normalizeNullable(reason),
       frequency,
       frequencyType,
       transactionAmount,
       currencyId,
       normalizeNullable(backUrl),
+      isActive !== undefined ? Boolean(isActive) : true,
       normalizeSubscriptionStatus(status),
       normalizeNullable(createdBy),
     ],
   );
 
   return result.rows[0];
+}
+
+function mapPublicPlanContract(plan) {
+  return {
+    id: plan.id,
+    name: plan.name,
+    description: plan.description || null,
+    transaction_amount: Number(plan.transaction_amount),
+    frequency: Number(plan.frequency),
+    frequency_type: plan.frequency_type,
+    currency_id: plan.currency_id,
+    preapproval_plan_id: plan.mp_plan_id,
+  };
+}
+
+export async function listPublicSubscriptionPlans() {
+  const result = await query(
+    `
+      SELECT
+        id,
+        name,
+        description,
+        transaction_amount,
+        frequency,
+        frequency_type,
+        currency_id,
+        mp_plan_id,
+        is_active,
+        status,
+        created_at
+      FROM subscription_plans
+      WHERE is_active = true
+      ORDER BY transaction_amount ASC, created_at ASC
+    `,
+  );
+
+  return result.rows.map(mapPublicPlanContract);
+}
+
+async function findActivePlanByMpId(preapprovalPlanId) {
+  const result = await query(
+    `
+      SELECT
+        id,
+        mp_plan_id,
+        name,
+        description,
+        reason,
+        frequency,
+        frequency_type,
+        transaction_amount,
+        currency_id,
+        back_url,
+        is_active,
+        status
+      FROM subscription_plans
+      WHERE mp_plan_id = $1
+      LIMIT 1
+    `,
+    [preapprovalPlanId],
+  );
+
+  if (result.rowCount === 0) {
+    return null;
+  }
+
+  const plan = result.rows[0];
+
+  if (!plan.is_active) {
+    return null;
+  }
+
+  return plan;
 }
 
 async function findSubscriptionByReference(reference) {
@@ -1187,6 +1275,8 @@ async function fetchPreapproval({ token, preapprovalId }) {
 }
 
 export async function createSubscriptionPlan({
+  name,
+  description,
   reason,
   transactionAmount,
   frequency,
@@ -1205,7 +1295,9 @@ export async function createSubscriptionPlan({
   const finalAmount = sanitizeAmount(transactionAmount);
   const finalFrequency = sanitizeFrequency(frequency, 1);
   const finalFrequencyType = sanitizeFrequencyType(frequencyType, 'months');
-  const finalReason = normalizeNullable(reason) || 'Plano de assinatura';
+  const finalName = String(name || reason || 'Plano mensal').trim();
+  const finalReason = normalizeNullable(reason) || finalName;
+  const finalDescription = normalizeNullable(description);
   const finalBackUrl = normalizeNullable(backUrl) || normalizeNullable(process.env.MP_SUBSCRIPTION_BACK_URL);
 
   if (!finalBackUrl) {
@@ -1231,18 +1323,25 @@ export async function createSubscriptionPlan({
 
   const plan = await upsertSubscriptionPlan({
     mpPlanId: String(created?.id || '').trim(),
+    name: finalName,
+    description: finalDescription,
     reason: created?.reason || finalReason,
     frequency: Number(created?.auto_recurring?.frequency || finalFrequency),
     frequencyType: String(created?.auto_recurring?.frequency_type || finalFrequencyType),
     transactionAmount: Number(created?.auto_recurring?.transaction_amount || finalAmount),
     currencyId: String(created?.auto_recurring?.currency_id || normalizeCurrency(currencyId)),
     backUrl: created?.back_url || finalBackUrl,
+    isActive: true,
     status: created?.status || 'authorized',
     createdBy: user.id,
   });
 
   return {
-    plan,
+    plan: {
+      ...mapPublicPlanContract(plan),
+      is_active: Boolean(plan.is_active),
+      provider_status: plan.status,
+    },
     provider: {
       id: created?.id || null,
       init_point: created?.init_point || null,
@@ -1270,6 +1369,14 @@ export async function createSubscription({
     throw new AppError('preapproval_plan_id obrigatorio', 400, 'VALIDATION_ERROR');
   }
 
+  const activePlan = await findActivePlanByMpId(finalPlanId);
+
+  if (!activePlan) {
+    throw new AppError('Plano de assinatura inativo ou inexistente', 400, 'VALIDATION_ERROR', {
+      preapproval_plan_id: finalPlanId,
+    });
+  }
+
   const finalToken = normalizeNullable(cardTokenId);
 
   if (!finalToken) {
@@ -1277,7 +1384,7 @@ export async function createSubscription({
   }
 
   const finalStatus = normalizeNullable(status) || 'authorized';
-  const finalReason = normalizeNullable(reason) || 'Assinatura mensal';
+  const finalReason = normalizeNullable(reason) || activePlan.reason || activePlan.name || 'Assinatura mensal';
   const finalBackUrl = normalizeNullable(backUrl) || normalizeNullable(process.env.MP_SUBSCRIPTION_BACK_URL);
   const externalReference = toSubscriptionExternalReference(user.id);
 

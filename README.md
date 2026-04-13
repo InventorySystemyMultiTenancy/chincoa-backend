@@ -135,6 +135,7 @@ Regra promocional:
 - POST `/api/payments/ipn/mercadopago` (sem auth)
 - POST `/api/payments/webhooks/mercadopago` (sem auth)
 - POST `/api/payments/subscriptions/plans` (auth admin)
+- GET `/api/payments/subscriptions/plans/public` (publico)
 - POST `/api/payments/subscriptions` (auth)
 - GET `/api/payments/subscriptions/:reference` (auth)
 - POST `/api/payments/subscriptions/:reference/cancel` (auth)
@@ -148,6 +149,8 @@ Assinaturas recorrentes:
 - backend nao salva numero de cartao nem CVV; recebe apenas `token` do SDK
 - cobranca recorrente e feita pelo Mercado Pago
 - webhook de `preapproval/subscription` atualiza o status local da assinatura
+- frontend deve consumir o catalogo em `GET /api/payments/subscriptions/plans/public` para obter `preapproval_plan_id`
+- `POST /api/payments/subscriptions` valida se o `preapproval_plan_id` existe e esta ativo no backend
 
 ## Janela movel de agendamento
 
