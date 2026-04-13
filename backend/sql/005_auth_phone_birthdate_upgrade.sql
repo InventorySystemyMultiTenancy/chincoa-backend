@@ -9,9 +9,17 @@ ALTER TABLE users
 UPDATE users
 SET phone = regexp_replace(COALESCE(phone, ''), '\\D', '', 'g');
 
-UPDATE users
-SET phone = CONCAT('9', LPAD((ROW_NUMBER() OVER (ORDER BY created_at, id))::text, 10, '0'))
-WHERE phone IS NULL OR btrim(phone) = '';
+WITH ranked_users AS (
+  SELECT
+    id,
+    ROW_NUMBER() OVER (ORDER BY created_at, id) AS rn
+  FROM users
+  WHERE phone IS NULL OR btrim(phone) = ''
+)
+UPDATE users u
+SET phone = CONCAT('9', LPAD(r.rn::text, 10, '0'))
+FROM ranked_users r
+WHERE u.id = r.id;
 
 DO $$
 DECLARE
