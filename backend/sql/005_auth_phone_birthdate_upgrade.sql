@@ -58,6 +58,19 @@ BEGIN
   END IF;
 END $$;
 
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'users'::regclass
+      AND conname = 'users_email_key'
+      AND contype IN ('u', 'p')
+  ) THEN
+    ALTER TABLE users DROP CONSTRAINT users_email_key;
+  END IF;
+END $$;
+
 DROP INDEX IF EXISTS users_email_key;
 DROP INDEX IF EXISTS uq_users_email_not_null;
 
