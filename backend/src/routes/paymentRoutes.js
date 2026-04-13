@@ -19,6 +19,21 @@ import { requireAdmin, requireAuth } from '../middlewares/authMiddleware.js';
 import { resolvePaymentStore } from '../middlewares/paymentStoreMiddleware.js';
 
 const router = Router();
+const PAYMENT_DEBUG_LOGS = String(process.env.PAYMENT_DEBUG_LOGS || '').trim() === 'true';
+
+router.use((req, _res, next) => {
+  if (PAYMENT_DEBUG_LOGS) {
+    console.log(
+      '[payments:route-hit]',
+      JSON.stringify({
+        method: req.method,
+        path: req.originalUrl,
+      }),
+    );
+  }
+
+  next();
+});
 
 router.use(resolvePaymentStore);
 

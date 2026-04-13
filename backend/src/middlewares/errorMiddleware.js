@@ -1,8 +1,19 @@
 import { sendError } from '../utils/apiResponse.js';
 
 const appointmentDebugLogs = String(process.env.APPOINTMENT_DEBUG_LOGS || '').trim() === 'true';
+const paymentDebugLogs = String(process.env.PAYMENT_DEBUG_LOGS || '').trim() === 'true';
 
 export function notFoundHandler(_req, res) {
+  if (paymentDebugLogs && (_req.path.startsWith('/api/payments') || _req.path.startsWith('/api/payment'))) {
+    console.log(
+      '[payments:not-found]',
+      JSON.stringify({
+        method: _req.method,
+        path: _req.path,
+      }),
+    );
+  }
+
   return sendError(res, 404, 'Rota nao encontrada', 'NOT_FOUND');
 }
 
