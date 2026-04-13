@@ -1,8 +1,12 @@
 import {
+  cancelSubscription,
   cancelPayment,
   checkPaymentStatus,
+  createSubscription,
+  createSubscriptionPlan,
   createPixPayment,
   createPointPayment,
+  getSubscriptionStatus,
   processIpnNotification,
   processWebhookNotification,
 } from '../services/paymentService.js';
@@ -132,4 +136,80 @@ export function postMercadoPagoWebhook(req, res, _next) {
       console.error('[payments:webhook-error]', error.message);
     }
   });
+}
+
+export async function postCreateSubscriptionPlan(req, res, next) {
+  try {
+    requireFields(req.body, ['transaction_amount']);
+
+    const result = await createSubscriptionPlan({
+      reason: req.body.reason,
+      transactionAmount: req.body.transaction_amount,
+      frequency: req.body.frequency,
+      frequencyType: req.body.frequency_type,
+      currencyId: req.body.currency_id,
+      backUrl: req.body.back_url,
+      idempotencyKey: getIdempotencyKey(req),
+      user: req.user,
+      store: req.store,
+    });
+
+    return sendSuccess(res, 201, result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function postCreateSubscription(req, res, next) {
+  try {
+    requireFields(req.body, ['preapproval_plan_id', 'token', 'email']);
+
+    const result = await createSubscription({
+      preapprovalPlanId: req.body.preapproval_plan_id,
+      payerEmail: req.body.email,
+      cardTokenId: req.body.token,
+      reason: req.body.reason,
+      backUrl: req.body.back_url,
+      status: req.body.status,
+      idempotencyKey: getIdempotencyKey(req),
+      user: req.user,
+      store: req.store,
+    });
+
+    return sendSuccess(res, 201, result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getSubscription(req, res, next) {
+  try {
+    const reference = normalizeReference(req.params.reference);
+
+    const result = await getSubscriptionStatus({
+      reference,
+      user: req.user,
+      store: req.store,
+    });
+
+    return sendSuccess(res, 200, result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function postCancelSubscription(req, res, next) {
+  try {
+    const reference = normalizeReference(req.params.reference);
+
+    const result = await cancelSubscription({
+      reference,
+      user: req.user,
+      store: req.store,
+    });
+
+    return sendSuccess(res, 200, result);
+  } catch (error) {
+    return next(error);
+  }
 }

@@ -37,6 +37,7 @@ Copie [backend/.env.example](backend/.env.example) para [backend/.env](backend/.
 - MP_ACCESS_TOKEN
 - MP_DEVICE_ID
 - BACKEND_PUBLIC_URL (URL publica do backend para receber notificacoes)
+- MP_SUBSCRIPTION_BACK_URL (opcional, URL de retorno para fluxo de assinatura)
 - MP_API_BASE_URL (opcional, padrao Mercado Pago)
 - MP_REQUEST_TIMEOUT_MS (opcional)
 - MP_MAX_RETRIES (opcional)
@@ -133,8 +134,20 @@ Regra promocional:
 - DELETE `/api/payments/cancel/:reference` (auth)
 - POST `/api/payments/ipn/mercadopago` (sem auth)
 - POST `/api/payments/webhooks/mercadopago` (sem auth)
+- POST `/api/payments/subscriptions/plans` (auth admin)
+- POST `/api/payments/subscriptions` (auth)
+- GET `/api/payments/subscriptions/:reference` (auth)
+- POST `/api/payments/subscriptions/:reference/cancel` (auth)
+- DELETE `/api/payments/subscriptions/:reference/cancel` (auth)
 
 Compatibilidade com referencia legada: os mesmos endpoints tambem respondem em `/api/payment/*`.
+
+Assinaturas recorrentes:
+
+- usa API `preapproval_plan` e `preapproval` do Mercado Pago
+- backend nao salva numero de cartao nem CVV; recebe apenas `token` do SDK
+- cobranca recorrente e feita pelo Mercado Pago
+- webhook de `preapproval/subscription` atualiza o status local da assinatura
 
 ## Janela movel de agendamento
 

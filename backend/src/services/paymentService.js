@@ -80,6 +80,32 @@ function normalizePointIntentState(rawState) {
   return 'pending';
 }
 
+function normalizeSubscriptionStatus(rawStatus) {
+  const status = String(rawStatus || '').trim().toLowerCase();
+
+  if (!status) {
+    return 'pending';
+  }
+
+  if (status === 'authorized' || status === 'active') {
+    return 'authorized';
+  }
+
+  if (status === 'paused' || status === 'suspended') {
+    return 'paused';
+  }
+
+  if (status === 'cancelled' || status === 'canceled') {
+    return 'cancelled';
+  }
+
+  if (status === 'pending') {
+    return 'pending';
+  }
+
+  return 'pending';
+}
+
 function buildMercadoPagoError(data, statusCode) {
   const apiMessage = data?.message || data?.error || data?.cause?.[0]?.description;
   const message = apiMessage || 'Falha na comunicacao com Mercado Pago';
@@ -108,6 +134,59 @@ function fromExternalReference(externalReference) {
   }
 
   return UUID_REGEX.test(text) ? text : null;
+}
+
+function toSubscriptionExternalReference(userId) {
+  return `subscription:${userId}`;
+}
+
+function fromSubscriptionExternalReference(externalReference) {
+  const text = normalizeNullable(externalReference);
+
+  if (!text) {
+    return null;
+  }
+
+  if (!text.startsWith('subscription:')) {
+    return null;
+  }
+
+  const candidate = text.slice('subscription:'.length);
+  return UUID_REGEX.test(candidate) ? candidate : null;
+}
+
+function ensureSubscriptionEmail(email) {
+  const normalized = normalizeNullable(email);
+
+  if (!normalized) {
+    throw new AppError('Email do assinante obrigatorio para criar assinatura', 400, 'VALIDATION_ERROR');
+  }
+
+  return normalized;
+}
+
+function normalizeCurrency(currencyId) {
+  return normalizeNullable(currencyId) || 'BRL';
+}
+
+function sanitizeFrequency(value, fallback = 1) {
+  const number = Number(value ?? fallback);
+
+  if (!Number.isInteger(number) || number <= 0) {
+    throw new AppError('Frequencia da recorrencia invalida', 400, 'VALIDATION_ERROR');
+  }
+
+  return number;
+}
+
+function sanitizeFrequencyType(value, fallback = 'months') {
+  const normalized = String(value || fallback).trim().toLowerCase();
+
+  if (!['days', 'months'].includes(normalized)) {
+    throw new AppError('frequency_type invalido. Use days ou months', 400, 'VALIDATION_ERROR');
+  }
+
+  return normalized;
 }
 
 function ensureMercadoPagoToken(store) {
@@ -414,6 +493,175 @@ async function registerNotification({ source, notificationKey, topic, resourceId
   );
 
   return result.rowCount > 0;
+}
+
+async function upsertSubscriptionPlan({
+  mpPlanId,
+  reason,
+  frequency,
+  frequencyType,
+  transactionAmount,
+  currencyId,
+  backUrl,
+  status,
+  createdBy,
+}) {
+  const result = await query(
+    `
+      INSERT INTO subscription_plans (
+        mp_plan_id,
+        reason,
+        frequency,
+        frequency_type,
+        transaction_amount,
+        currency_id,
+        back_url,
+        status,
+        created_by
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT (mp_plan_id)
+      DO UPDATE SET
+        reason = EXCLUDED.reason,
+        frequency = EXCLUDED.frequency,
+        frequency_type = EXCLUDED.frequency_type,
+        transaction_amount = EXCLUDED.transaction_amount,
+        currency_id = EXCLUDED.currency_id,
+        back_url = EXCLUDED.back_url,
+        status = EXCLUDED.status,
+        updated_at = NOW()
+      RETURNING
+        id,
+        mp_plan_id,
+        reason,
+        frequency,
+        frequency_type,
+        transaction_amount,
+        currency_id,
+        back_url,
+        status,
+        created_by,
+        created_at,
+        updated_at
+    `,
+    [
+      mpPlanId,
+      normalizeNullable(reason),
+      frequency,
+      frequencyType,
+      transactionAmount,
+      currencyId,
+      normalizeNullable(backUrl),
+      normalizeSubscriptionStatus(status),
+      normalizeNullable(createdBy),
+    ],
+  );
+
+  return result.rows[0];
+}
+
+async function findSubscriptionByReference(reference) {
+  const result = await query(
+    `
+      SELECT
+        id,
+        user_id,
+        payer_email,
+        mp_preapproval_id,
+        mp_plan_id,
+        external_reference,
+        reason,
+        status,
+        provider_status,
+        next_payment_date,
+        back_url,
+        card_token_last4,
+        created_at,
+        updated_at
+      FROM subscriptions
+      WHERE id::text = $1 OR mp_preapproval_id = $1
+      LIMIT 1
+    `,
+    [reference],
+  );
+
+  return result.rowCount > 0 ? result.rows[0] : null;
+}
+
+async function upsertSubscriptionFromProvider({
+  mpPreapprovalId,
+  userId,
+  payerEmail,
+  mpPlanId,
+  externalReference,
+  reason,
+  status,
+  providerStatus,
+  nextPaymentDate,
+  backUrl,
+  cardTokenLast4,
+}) {
+  const result = await query(
+    `
+      INSERT INTO subscriptions (
+        user_id,
+        payer_email,
+        mp_preapproval_id,
+        mp_plan_id,
+        external_reference,
+        reason,
+        status,
+        provider_status,
+        next_payment_date,
+        back_url,
+        card_token_last4
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      ON CONFLICT (mp_preapproval_id)
+      DO UPDATE SET
+        user_id = COALESCE(EXCLUDED.user_id, subscriptions.user_id),
+        payer_email = COALESCE(EXCLUDED.payer_email, subscriptions.payer_email),
+        mp_plan_id = COALESCE(EXCLUDED.mp_plan_id, subscriptions.mp_plan_id),
+        external_reference = COALESCE(EXCLUDED.external_reference, subscriptions.external_reference),
+        reason = COALESCE(EXCLUDED.reason, subscriptions.reason),
+        status = EXCLUDED.status,
+        provider_status = COALESCE(EXCLUDED.provider_status, subscriptions.provider_status),
+        next_payment_date = COALESCE(EXCLUDED.next_payment_date, subscriptions.next_payment_date),
+        back_url = COALESCE(EXCLUDED.back_url, subscriptions.back_url),
+        card_token_last4 = COALESCE(EXCLUDED.card_token_last4, subscriptions.card_token_last4),
+        updated_at = NOW()
+      RETURNING
+        id,
+        user_id,
+        payer_email,
+        mp_preapproval_id,
+        mp_plan_id,
+        external_reference,
+        reason,
+        status,
+        provider_status,
+        next_payment_date,
+        back_url,
+        card_token_last4,
+        created_at,
+        updated_at
+    `,
+    [
+      normalizeNullable(userId),
+      normalizeNullable(payerEmail),
+      mpPreapprovalId,
+      normalizeNullable(mpPlanId),
+      normalizeNullable(externalReference),
+      normalizeNullable(reason),
+      normalizeSubscriptionStatus(status || providerStatus),
+      normalizeNullable(providerStatus),
+      normalizeNullable(nextPaymentDate),
+      normalizeNullable(backUrl),
+      normalizeNullable(cardTokenLast4),
+    ],
+  );
+
+  return result.rows[0];
 }
 
 async function finishNotification({ notificationKey, success, errorMessage = null }) {
@@ -784,6 +1032,242 @@ function isPaymentTopic(topic, action) {
   return full.includes('payment');
 }
 
+function isPreapprovalTopic(topic, action) {
+  const full = `${String(topic || '')} ${String(action || '')}`.toLowerCase();
+  return full.includes('preapproval') || full.includes('subscription');
+}
+
+async function fetchPreapproval({ token, preapprovalId }) {
+  try {
+    return await mercadoPagoRequest({
+      path: `/preapproval/${preapprovalId}`,
+      method: 'GET',
+      token,
+    });
+  } catch (error) {
+    if (error.code === 'MERCADO_PAGO_REQUEST_FAILED' && error.details?.provider_status === 404) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+export async function createSubscriptionPlan({
+  reason,
+  transactionAmount,
+  frequency,
+  frequencyType,
+  currencyId,
+  backUrl,
+  idempotencyKey,
+  user,
+  store,
+}) {
+  if (user.role !== 'admin') {
+    throw new AppError('Somente admin pode criar plano de assinatura', 403, 'FORBIDDEN');
+  }
+
+  const token = ensureMercadoPagoToken(store);
+  const finalAmount = sanitizeAmount(transactionAmount);
+  const finalFrequency = sanitizeFrequency(frequency, 1);
+  const finalFrequencyType = sanitizeFrequencyType(frequencyType, 'months');
+  const finalReason = normalizeNullable(reason) || 'Plano de assinatura';
+  const finalBackUrl = normalizeNullable(backUrl) || normalizeNullable(process.env.MP_SUBSCRIPTION_BACK_URL);
+
+  const created = await mercadoPagoRequest({
+    path: '/preapproval_plan',
+    method: 'POST',
+    token,
+    idempotencyKey: normalizeNullable(idempotencyKey) || `plan:${finalReason}:${finalAmount}`,
+    payload: {
+      reason: finalReason,
+      auto_recurring: {
+        frequency: finalFrequency,
+        frequency_type: finalFrequencyType,
+        transaction_amount: finalAmount,
+        currency_id: normalizeCurrency(currencyId),
+      },
+      back_url: finalBackUrl || undefined,
+    },
+  });
+
+  const plan = await upsertSubscriptionPlan({
+    mpPlanId: String(created?.id || '').trim(),
+    reason: created?.reason || finalReason,
+    frequency: Number(created?.auto_recurring?.frequency || finalFrequency),
+    frequencyType: String(created?.auto_recurring?.frequency_type || finalFrequencyType),
+    transactionAmount: Number(created?.auto_recurring?.transaction_amount || finalAmount),
+    currencyId: String(created?.auto_recurring?.currency_id || normalizeCurrency(currencyId)),
+    backUrl: created?.back_url || finalBackUrl,
+    status: created?.status || 'authorized',
+    createdBy: user.id,
+  });
+
+  return {
+    plan,
+    provider: {
+      id: created?.id || null,
+      init_point: created?.init_point || null,
+      back_url: created?.back_url || null,
+    },
+  };
+}
+
+export async function createSubscription({
+  preapprovalPlanId,
+  payerEmail,
+  cardTokenId,
+  reason,
+  backUrl,
+  status,
+  idempotencyKey,
+  user,
+  store,
+}) {
+  const token = ensureMercadoPagoToken(store);
+  const finalEmail = ensureSubscriptionEmail(payerEmail);
+  const finalPlanId = normalizeNullable(preapprovalPlanId);
+
+  if (!finalPlanId) {
+    throw new AppError('preapproval_plan_id obrigatorio', 400, 'VALIDATION_ERROR');
+  }
+
+  const finalToken = normalizeNullable(cardTokenId);
+
+  if (!finalToken) {
+    throw new AppError('card_token_id obrigatorio', 400, 'VALIDATION_ERROR');
+  }
+
+  const finalStatus = normalizeNullable(status) || 'authorized';
+  const finalReason = normalizeNullable(reason) || 'Assinatura mensal';
+  const finalBackUrl = normalizeNullable(backUrl) || normalizeNullable(process.env.MP_SUBSCRIPTION_BACK_URL);
+  const externalReference = toSubscriptionExternalReference(user.id);
+
+  const created = await mercadoPagoRequest({
+    path: '/preapproval',
+    method: 'POST',
+    token,
+    idempotencyKey: normalizeNullable(idempotencyKey) || `subscription:${user.id}:${finalPlanId}`,
+    payload: {
+      preapproval_plan_id: finalPlanId,
+      payer_email: finalEmail,
+      card_token_id: finalToken,
+      reason: finalReason,
+      status: finalStatus,
+      external_reference: externalReference,
+      back_url: finalBackUrl || undefined,
+    },
+  });
+
+  const subscription = await upsertSubscriptionFromProvider({
+    mpPreapprovalId: String(created?.id || '').trim(),
+    userId: user.id,
+    payerEmail: created?.payer_email || finalEmail,
+    mpPlanId: created?.preapproval_plan_id || finalPlanId,
+    externalReference: created?.external_reference || externalReference,
+    reason: created?.reason || finalReason,
+    status: created?.status || finalStatus,
+    providerStatus: created?.status,
+    nextPaymentDate: created?.next_payment_date,
+    backUrl: created?.back_url || finalBackUrl,
+    cardTokenLast4: created?.card_id ? String(created.card_id).slice(-4) : null,
+  });
+
+  return {
+    subscription,
+    provider: {
+      id: created?.id || null,
+      status: created?.status || null,
+      next_payment_date: created?.next_payment_date || null,
+    },
+  };
+}
+
+export async function getSubscriptionStatus({ reference, user, store }) {
+  const token = ensureMercadoPagoToken(store);
+  const local = await findSubscriptionByReference(reference);
+
+  if (!local) {
+    throw new AppError('Assinatura nao encontrada', 404, 'SUBSCRIPTION_NOT_FOUND');
+  }
+
+  if (user.role !== 'admin' && local.user_id !== user.id) {
+    throw new AppError('Sem permissao para consultar esta assinatura', 403, 'FORBIDDEN');
+  }
+
+  const provider = await fetchPreapproval({ token, preapprovalId: local.mp_preapproval_id });
+
+  if (!provider) {
+    return {
+      subscription: local,
+      provider: null,
+    };
+  }
+
+  const updated = await upsertSubscriptionFromProvider({
+    mpPreapprovalId: local.mp_preapproval_id,
+    userId: local.user_id,
+    payerEmail: provider?.payer_email || local.payer_email,
+    mpPlanId: provider?.preapproval_plan_id || local.mp_plan_id,
+    externalReference: provider?.external_reference || local.external_reference,
+    reason: provider?.reason || local.reason,
+    status: provider?.status || local.status,
+    providerStatus: provider?.status,
+    nextPaymentDate: provider?.next_payment_date || local.next_payment_date,
+    backUrl: provider?.back_url || local.back_url,
+    cardTokenLast4: local.card_token_last4,
+  });
+
+  return {
+    subscription: updated,
+    provider: {
+      id: provider?.id || null,
+      status: provider?.status || null,
+      next_payment_date: provider?.next_payment_date || null,
+    },
+  };
+}
+
+export async function cancelSubscription({ reference, user, store }) {
+  const token = ensureMercadoPagoToken(store);
+  const local = await findSubscriptionByReference(reference);
+
+  if (!local) {
+    throw new AppError('Assinatura nao encontrada', 404, 'SUBSCRIPTION_NOT_FOUND');
+  }
+
+  if (user.role !== 'admin' && local.user_id !== user.id) {
+    throw new AppError('Sem permissao para cancelar esta assinatura', 403, 'FORBIDDEN');
+  }
+
+  const canceled = await mercadoPagoRequest({
+    path: `/preapproval/${local.mp_preapproval_id}`,
+    method: 'PUT',
+    token,
+    payload: { status: 'cancelled' },
+  });
+
+  const updated = await upsertSubscriptionFromProvider({
+    mpPreapprovalId: local.mp_preapproval_id,
+    userId: local.user_id,
+    payerEmail: canceled?.payer_email || local.payer_email,
+    mpPlanId: canceled?.preapproval_plan_id || local.mp_plan_id,
+    externalReference: canceled?.external_reference || local.external_reference,
+    reason: canceled?.reason || local.reason,
+    status: canceled?.status || 'cancelled',
+    providerStatus: canceled?.status || 'cancelled',
+    nextPaymentDate: canceled?.next_payment_date || local.next_payment_date,
+    backUrl: canceled?.back_url || local.back_url,
+    cardTokenLast4: local.card_token_last4,
+  });
+
+  return {
+    subscription: updated,
+    canceled: true,
+  };
+}
+
 async function processNotification({ source, queryParams, body, store }) {
   const token = ensureMercadoPagoToken(store);
   const topic = normalizeNullable(queryParams?.topic) || normalizeNullable(body?.topic) || normalizeNullable(body?.type) || 'unknown';
@@ -811,6 +1295,36 @@ async function processNotification({ source, queryParams, body, store }) {
   }
 
   try {
+    if (isPreapprovalTopic(topic, action)) {
+      const preapproval = await fetchPreapproval({ token, preapprovalId: resourceId });
+
+      if (preapproval) {
+        const userIdFromReference = fromSubscriptionExternalReference(preapproval?.external_reference);
+
+        await upsertSubscriptionFromProvider({
+          mpPreapprovalId: String(preapproval?.id || resourceId),
+          userId: userIdFromReference,
+          payerEmail: preapproval?.payer_email,
+          mpPlanId: preapproval?.preapproval_plan_id,
+          externalReference: preapproval?.external_reference,
+          reason: preapproval?.reason,
+          status: preapproval?.status,
+          providerStatus: preapproval?.status,
+          nextPaymentDate: preapproval?.next_payment_date,
+          backUrl: preapproval?.back_url,
+          cardTokenLast4: null,
+        });
+      }
+
+      await finishNotification({ notificationKey, success: true });
+
+      return {
+        processed: true,
+        preapprovalId: resourceId,
+        status: normalizeSubscriptionStatus(preapproval?.status),
+      };
+    }
+
     if (!isPaymentTopic(topic, action)) {
       await finishNotification({ notificationKey, success: true });
       return { ignored: true, reason: 'non-payment-topic' };
