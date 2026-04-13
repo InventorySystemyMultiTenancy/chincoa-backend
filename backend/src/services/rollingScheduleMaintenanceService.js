@@ -68,20 +68,36 @@ export async function runRollingScheduleMaintenance() {
         INSERT INTO business_days (date, is_enabled, reason)
         SELECT d::date, true, NULL
         FROM generate_series($1::date, $2::date, '1 day'::interval) AS d
-        ON CONFLICT (date) DO NOTHING
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM business_days bd
+          WHERE bd.date = d::date
+        )
       `,
       [window.nowDate, window.bookingEndDate],
     );
 
-    await client.query(
+    const updatedSetting = await client.query(
       `
-        INSERT INTO system_settings (setting_key, setting_value)
-        VALUES ($1, $2)
-        ON CONFLICT (setting_key)
-        DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW()
+        UPDATE system_settings
+        SET setting_value = $2, updated_at = NOW()
+        WHERE setting_key = $1
       `,
       [ROLLING_WINDOW_STATE_KEY, window.nowDate],
     );
+
+    if (updatedSetting.rowCount === 0) {
+      await client.query(
+        `
+          INSERT INTO system_settings (setting_key, setting_value)
+          SELECT $1, $2
+          WHERE NOT EXISTS (
+            SELECT 1 FROM system_settings WHERE setting_key = $1
+          )
+        `,
+        [ROLLING_WINDOW_STATE_KEY, window.nowDate],
+      );
+    }
 
     await client.query('COMMIT');
   } catch (error) {

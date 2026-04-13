@@ -61,15 +61,27 @@ export async function resetWeeklyBookingFlagsIfNeeded() {
     if (lastResetWeek !== weekStart) {
       await client.query('UPDATE business_hours SET is_booked_week = false');
 
-      await client.query(
+      const updatedSetting = await client.query(
         `
-          INSERT INTO system_settings (setting_key, setting_value)
-          VALUES ($1, $2)
-          ON CONFLICT (setting_key)
-          DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW()
+          UPDATE system_settings
+          SET setting_value = $2, updated_at = NOW()
+          WHERE setting_key = $1
         `,
         [RESET_KEY, weekStart],
       );
+
+      if (updatedSetting.rowCount === 0) {
+        await client.query(
+          `
+            INSERT INTO system_settings (setting_key, setting_value)
+            SELECT $1, $2
+            WHERE NOT EXISTS (
+              SELECT 1 FROM system_settings WHERE setting_key = $1
+            )
+          `,
+          [RESET_KEY, weekStart],
+        );
+      }
 
       console.log(`Reset semanal aplicado para semana iniciada em ${weekStart}`);
     }

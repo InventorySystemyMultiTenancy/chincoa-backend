@@ -13,23 +13,52 @@ export async function seedInitialAdmin() {
   const fullName = 'Administrador Chincoa';
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
-  if (shouldOverwritePassword) {
+  const existing = await query(
+    `
+      SELECT id
+      FROM users
+      WHERE lower(email) = lower($1)
+      LIMIT 1
+    `,
+    [email],
+  );
+
+  if (existing.rowCount > 0) {
+    if (shouldOverwritePassword) {
+      await query(
+        `
+          UPDATE users
+          SET
+            full_name = $2,
+            email = $3,
+            phone = $4,
+            birth_date = $5,
+            password_hash = $6,
+            role = 'admin'
+          WHERE id = $1
+        `,
+        [existing.rows[0].id, fullName, email, phone, birthDate, passwordHash],
+      );
+
+      console.log(`Admin garantido para: ${email} (senha atualizada por flag)`);
+      return;
+    }
+
     await query(
       `
-        INSERT INTO users (full_name, email, phone, birth_date, password_hash, role)
-        VALUES ($1, $2, $3, $4, $5, 'admin')
-        ON CONFLICT (email)
-        DO UPDATE SET
-          full_name = EXCLUDED.full_name,
-          phone = EXCLUDED.phone,
-          birth_date = EXCLUDED.birth_date,
-          password_hash = EXCLUDED.password_hash,
+        UPDATE users
+        SET
+          full_name = $2,
+          email = $3,
+          phone = $4,
+          birth_date = $5,
           role = 'admin'
+        WHERE id = $1
       `,
-      [fullName, email, phone, birthDate, passwordHash],
+      [existing.rows[0].id, fullName, email, phone, birthDate],
     );
 
-    console.log(`Admin garantido para: ${email} (senha atualizada por flag)`);
+    console.log(`Admin inicial garantido para: ${email}`);
     return;
   }
 
@@ -37,12 +66,6 @@ export async function seedInitialAdmin() {
     `
       INSERT INTO users (full_name, email, phone, birth_date, password_hash, role)
       VALUES ($1, $2, $3, $4, $5, 'admin')
-      ON CONFLICT (email)
-      DO UPDATE SET
-        full_name = EXCLUDED.full_name,
-        phone = EXCLUDED.phone,
-        birth_date = EXCLUDED.birth_date,
-        role = 'admin'
     `,
     [fullName, email, phone, birthDate, passwordHash],
   );
