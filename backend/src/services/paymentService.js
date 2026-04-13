@@ -518,36 +518,38 @@ async function upsertSubscriptionPlan({
   status,
   createdBy,
 }) {
-  const result = await query(
+  const payload = [
+    mpPlanId,
+    String(name || reason || 'Plano mensal').trim(),
+    normalizeNullable(description),
+    normalizeNullable(reason),
+    frequency,
+    frequencyType,
+    transactionAmount,
+    currencyId,
+    normalizeNullable(backUrl),
+    isActive !== undefined ? Boolean(isActive) : true,
+    normalizeSubscriptionStatus(status),
+    normalizeNullable(createdBy),
+  ];
+
+  const updated = await query(
     `
-      INSERT INTO subscription_plans (
-        mp_plan_id,
-        name,
-        description,
-        reason,
-        frequency,
-        frequency_type,
-        transaction_amount,
-        currency_id,
-        back_url,
-        is_active,
-        status,
-        created_by
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-      ON CONFLICT (mp_plan_id)
-      DO UPDATE SET
-        name = EXCLUDED.name,
-        description = EXCLUDED.description,
-        reason = EXCLUDED.reason,
-        frequency = EXCLUDED.frequency,
-        frequency_type = EXCLUDED.frequency_type,
-        transaction_amount = EXCLUDED.transaction_amount,
-        currency_id = EXCLUDED.currency_id,
-        back_url = EXCLUDED.back_url,
-        is_active = EXCLUDED.is_active,
-        status = EXCLUDED.status,
+      UPDATE subscription_plans
+      SET
+        name = $2,
+        description = $3,
+        reason = $4,
+        frequency = $5,
+        frequency_type = $6,
+        transaction_amount = $7,
+        currency_id = $8,
+        back_url = $9,
+        is_active = $10,
+        status = $11,
+        created_by = COALESCE($12, created_by),
         updated_at = NOW()
+      WHERE mp_plan_id = $1
       RETURNING
         id,
         mp_plan_id,
@@ -565,23 +567,83 @@ async function upsertSubscriptionPlan({
         created_at,
         updated_at
     `,
-    [
-      mpPlanId,
-      String(name || reason || 'Plano mensal').trim(),
-      normalizeNullable(description),
-      normalizeNullable(reason),
-      frequency,
-      frequencyType,
-      transactionAmount,
-      currencyId,
-      normalizeNullable(backUrl),
-      isActive !== undefined ? Boolean(isActive) : true,
-      normalizeSubscriptionStatus(status),
-      normalizeNullable(createdBy),
-    ],
+    payload,
   );
 
-  return result.rows[0];
+  if (updated.rowCount > 0) {
+    return updated.rows[0];
+  }
+
+  const inserted = await query(
+    `
+      INSERT INTO subscription_plans (
+        mp_plan_id,
+        name,
+        description,
+        reason,
+        frequency,
+        frequency_type,
+        transaction_amount,
+        currency_id,
+        back_url,
+        is_active,
+        status,
+        created_by
+      )
+      SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+      WHERE NOT EXISTS (
+        SELECT 1 FROM subscription_plans WHERE mp_plan_id = $1
+      )
+      RETURNING
+        id,
+        mp_plan_id,
+        name,
+        description,
+        reason,
+        frequency,
+        frequency_type,
+        transaction_amount,
+        currency_id,
+        back_url,
+        is_active,
+        status,
+        created_by,
+        created_at,
+        updated_at
+    `,
+    payload,
+  );
+
+  if (inserted.rowCount > 0) {
+    return inserted.rows[0];
+  }
+
+  const fallback = await query(
+    `
+      SELECT
+        id,
+        mp_plan_id,
+        name,
+        description,
+        reason,
+        frequency,
+        frequency_type,
+        transaction_amount,
+        currency_id,
+        back_url,
+        is_active,
+        status,
+        created_by,
+        created_at,
+        updated_at
+      FROM subscription_plans
+      WHERE mp_plan_id = $1
+      LIMIT 1
+    `,
+    [mpPlanId],
+  );
+
+  return fallback.rows[0];
 }
 
 function mapPublicPlanContract(plan) {
@@ -782,35 +844,36 @@ async function upsertSubscriptionFromProvider({
   backUrl,
   cardTokenLast4,
 }) {
-  const result = await query(
+  const payload = [
+    normalizeNullable(userId),
+    normalizeNullable(payerEmail),
+    mpPreapprovalId,
+    normalizeNullable(mpPlanId),
+    normalizeNullable(externalReference),
+    normalizeNullable(reason),
+    normalizeSubscriptionStatus(status || providerStatus),
+    normalizeNullable(providerStatus),
+    normalizeNullable(nextPaymentDate),
+    normalizeNullable(backUrl),
+    normalizeNullable(cardTokenLast4),
+  ];
+
+  const updated = await query(
     `
-      INSERT INTO subscriptions (
-        user_id,
-        payer_email,
-        mp_preapproval_id,
-        mp_plan_id,
-        external_reference,
-        reason,
-        status,
-        provider_status,
-        next_payment_date,
-        back_url,
-        card_token_last4
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      ON CONFLICT (mp_preapproval_id)
-      DO UPDATE SET
-        user_id = COALESCE(EXCLUDED.user_id, subscriptions.user_id),
-        payer_email = COALESCE(EXCLUDED.payer_email, subscriptions.payer_email),
-        mp_plan_id = COALESCE(EXCLUDED.mp_plan_id, subscriptions.mp_plan_id),
-        external_reference = COALESCE(EXCLUDED.external_reference, subscriptions.external_reference),
-        reason = COALESCE(EXCLUDED.reason, subscriptions.reason),
-        status = EXCLUDED.status,
-        provider_status = COALESCE(EXCLUDED.provider_status, subscriptions.provider_status),
-        next_payment_date = COALESCE(EXCLUDED.next_payment_date, subscriptions.next_payment_date),
-        back_url = COALESCE(EXCLUDED.back_url, subscriptions.back_url),
-        card_token_last4 = COALESCE(EXCLUDED.card_token_last4, subscriptions.card_token_last4),
+      UPDATE subscriptions
+      SET
+        user_id = COALESCE($1, user_id),
+        payer_email = COALESCE($2, payer_email),
+        mp_plan_id = COALESCE($4, mp_plan_id),
+        external_reference = COALESCE($5, external_reference),
+        reason = COALESCE($6, reason),
+        status = $7,
+        provider_status = COALESCE($8, provider_status),
+        next_payment_date = COALESCE($9, next_payment_date),
+        back_url = COALESCE($10, back_url),
+        card_token_last4 = COALESCE($11, card_token_last4),
         updated_at = NOW()
+      WHERE mp_preapproval_id = $3
       RETURNING
         id,
         user_id,
@@ -827,22 +890,80 @@ async function upsertSubscriptionFromProvider({
         created_at,
         updated_at
     `,
-    [
-      normalizeNullable(userId),
-      normalizeNullable(payerEmail),
-      mpPreapprovalId,
-      normalizeNullable(mpPlanId),
-      normalizeNullable(externalReference),
-      normalizeNullable(reason),
-      normalizeSubscriptionStatus(status || providerStatus),
-      normalizeNullable(providerStatus),
-      normalizeNullable(nextPaymentDate),
-      normalizeNullable(backUrl),
-      normalizeNullable(cardTokenLast4),
-    ],
+    payload,
   );
 
-  return result.rows[0];
+  if (updated.rowCount > 0) {
+    return updated.rows[0];
+  }
+
+  const inserted = await query(
+    `
+      INSERT INTO subscriptions (
+        user_id,
+        payer_email,
+        mp_preapproval_id,
+        mp_plan_id,
+        external_reference,
+        reason,
+        status,
+        provider_status,
+        next_payment_date,
+        back_url,
+        card_token_last4
+      )
+      SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+      WHERE NOT EXISTS (
+        SELECT 1 FROM subscriptions WHERE mp_preapproval_id = $3
+      )
+      RETURNING
+        id,
+        user_id,
+        payer_email,
+        mp_preapproval_id,
+        mp_plan_id,
+        external_reference,
+        reason,
+        status,
+        provider_status,
+        next_payment_date,
+        back_url,
+        card_token_last4,
+        created_at,
+        updated_at
+    `,
+    payload,
+  );
+
+  if (inserted.rowCount > 0) {
+    return inserted.rows[0];
+  }
+
+  const fallback = await query(
+    `
+      SELECT
+        id,
+        user_id,
+        payer_email,
+        mp_preapproval_id,
+        mp_plan_id,
+        external_reference,
+        reason,
+        status,
+        provider_status,
+        next_payment_date,
+        back_url,
+        card_token_last4,
+        created_at,
+        updated_at
+      FROM subscriptions
+      WHERE mp_preapproval_id = $1
+      LIMIT 1
+    `,
+    [mpPreapprovalId],
+  );
+
+  return fallback.rows[0];
 }
 
 async function getPlanByMpId(mpPlanId) {
@@ -890,17 +1011,33 @@ async function createSubscriptionAttempt({ subscriptionId, status, providerStatu
 }
 
 async function createSubscriptionProviderEvent({ subscriptionId, eventKey, type, status, message, payload }) {
+  const normalizedEventKey = normalizeNullable(eventKey);
+
+  if (normalizedEventKey) {
+    const existing = await query(
+      `
+        SELECT id, type, status, message, created_at
+        FROM subscription_provider_events
+        WHERE provider_event_key = $1
+        LIMIT 1
+      `,
+      [normalizedEventKey],
+    );
+
+    if (existing.rowCount > 0) {
+      return null;
+    }
+  }
+
   const result = await query(
     `
       INSERT INTO subscription_provider_events (subscription_id, provider_event_key, type, status, message, payload)
       VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-      ON CONFLICT (provider_event_key)
-      DO NOTHING
       RETURNING id, type, status, message, created_at
     `,
     [
       normalizeNullable(subscriptionId),
-      normalizeNullable(eventKey),
+      normalizedEventKey,
       normalizeNullable(type) || 'subscription_event',
       normalizeNullable(status),
       normalizeNullable(message),
