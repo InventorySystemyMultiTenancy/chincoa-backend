@@ -96,7 +96,7 @@ function normalizeSubscriptionStatus(rawStatus) {
   }
 
   if (status === 'cancelled' || status === 'canceled') {
-    return 'cancelled';
+    return 'canceled';
   }
 
   if (status === 'pending') {
@@ -106,11 +106,16 @@ function normalizeSubscriptionStatus(rawStatus) {
   return 'pending';
 }
 
+function isValidEmail(email) {
+  const text = String(email || '').trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
+}
+
 function buildMercadoPagoError(data, statusCode) {
   const apiMessage = data?.message || data?.error || data?.cause?.[0]?.description;
   const message = apiMessage || 'Falha na comunicacao com Mercado Pago';
 
-  return new AppError(message, statusCode >= 500 ? 502 : statusCode, 'MERCADO_PAGO_REQUEST_FAILED', {
+  return new AppError(message, statusCode >= 500 ? 502 : statusCode, 'PROVIDER_UNAVAILABLE', {
     provider_status: statusCode,
     provider_message: apiMessage || null,
     provider_error: data?.error || null,
@@ -160,6 +165,10 @@ function ensureSubscriptionEmail(email) {
 
   if (!normalized) {
     throw new AppError('Email do assinante obrigatorio para criar assinatura', 400, 'VALIDATION_ERROR');
+  }
+
+  if (!isValidEmail(normalized)) {
+    throw new AppError('Email do assinante invalido', 400, 'VALIDATION_ERROR');
   }
 
   return normalized;
@@ -284,7 +293,7 @@ async function mercadoPagoRequest({
       }
 
       if (error.name === 'AbortError') {
-        throw new AppError('Timeout ao comunicar com Mercado Pago', 504, 'MERCADO_PAGO_TIMEOUT');
+        throw new AppError('Timeout ao comunicar com Mercado Pago', 504, 'PROVIDER_UNAVAILABLE');
       }
 
       throw error;
@@ -293,7 +302,7 @@ async function mercadoPagoRequest({
     }
   }
 
-  throw new AppError('Falha de comunicacao com Mercado Pago', 502, 'MERCADO_PAGO_UNAVAILABLE');
+  throw new AppError('Falha de comunicacao com Mercado Pago', 502, 'PROVIDER_UNAVAILABLE');
 }
 
 async function findAppointmentByReference(reference) {
@@ -455,7 +464,7 @@ async function fetchPointIntent({ token, paymentIntentId }) {
     });
   } catch (error) {
     if (
-      error.code === 'MERCADO_PAGO_REQUEST_FAILED'
+      error.code === 'PROVIDER_UNAVAILABLE'
       && (error.details?.provider_status === 404 || error.details?.provider_status === 400)
     ) {
       return null;
@@ -473,7 +482,7 @@ async function fetchPayment({ token, paymentId }) {
       token,
     });
   } catch (error) {
-    if (error.code === 'MERCADO_PAGO_REQUEST_FAILED' && error.details?.provider_status === 404) {
+    if (error.code === 'PROVIDER_UNAVAILABLE' && error.details?.provider_status === 404) {
       return null;
     }
 
@@ -662,6 +671,130 @@ async function upsertSubscriptionFromProvider({
   );
 
   return result.rows[0];
+}
+
+async function getPlanByMpId(mpPlanId) {
+  if (!mpPlanId) {
+    return null;
+  }
+
+  const result = await query(
+    `
+      SELECT
+        mp_plan_id,
+        reason,
+        frequency,
+        frequency_type,
+        transaction_amount,
+        currency_id,
+        back_url
+      FROM subscription_plans
+      WHERE mp_plan_id = $1
+      LIMIT 1
+    `,
+    [mpPlanId],
+  );
+
+  return result.rowCount > 0 ? result.rows[0] : null;
+}
+
+async function createSubscriptionAttempt({ subscriptionId, status, providerStatus, message, amount }) {
+  const result = await query(
+    `
+      INSERT INTO subscription_attempts (subscription_id, status, provider_status, message, amount)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, status, provider_status, message, amount, created_at
+    `,
+    [
+      subscriptionId,
+      normalizeSubscriptionStatus(status || providerStatus),
+      normalizeNullable(providerStatus),
+      normalizeNullable(message),
+      Number.isFinite(Number(amount)) ? Number(amount) : null,
+    ],
+  );
+
+  return result.rows[0];
+}
+
+async function createSubscriptionProviderEvent({ subscriptionId, eventKey, type, status, message, payload }) {
+  const result = await query(
+    `
+      INSERT INTO subscription_provider_events (subscription_id, provider_event_key, type, status, message, payload)
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+      ON CONFLICT (provider_event_key)
+      DO NOTHING
+      RETURNING id, type, status, message, created_at
+    `,
+    [
+      normalizeNullable(subscriptionId),
+      normalizeNullable(eventKey),
+      normalizeNullable(type) || 'subscription_event',
+      normalizeNullable(status),
+      normalizeNullable(message),
+      JSON.stringify(payload || {}),
+    ],
+  );
+
+  return result.rowCount > 0 ? result.rows[0] : null;
+}
+
+async function listSubscriptionAttempts(subscriptionId) {
+  const result = await query(
+    `
+      SELECT id, status, provider_status, message, created_at, amount
+      FROM subscription_attempts
+      WHERE subscription_id = $1
+      ORDER BY created_at DESC
+      LIMIT 50
+    `,
+    [subscriptionId],
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    status: row.status,
+    provider_status: row.provider_status,
+    message: row.message,
+    created_at: row.created_at,
+    amount: row.amount === null ? null : Number(row.amount),
+  }));
+}
+
+async function listSubscriptionProviderEvents(subscriptionId) {
+  const result = await query(
+    `
+      SELECT id, type, status, message, created_at
+      FROM subscription_provider_events
+      WHERE subscription_id = $1
+      ORDER BY created_at DESC
+      LIMIT 100
+    `,
+    [subscriptionId],
+  );
+
+  return result.rows;
+}
+
+function mapSubscriptionContract({ subscription, plan, attempts, providerEvents }) {
+  return {
+    id: subscription.id,
+    mp_preapproval_id: subscription.mp_preapproval_id,
+    preapproval_plan_id: subscription.mp_plan_id || null,
+    status: normalizeSubscriptionStatus(subscription.status),
+    provider_status: subscription.provider_status || null,
+    next_payment_date: subscription.next_payment_date || null,
+    reason: subscription.reason || plan?.reason || null,
+    transaction_amount: plan?.transaction_amount !== undefined && plan?.transaction_amount !== null
+      ? Number(plan.transaction_amount)
+      : null,
+    currency_id: plan?.currency_id || 'BRL',
+    frequency: plan?.frequency ?? null,
+    frequency_type: plan?.frequency_type || null,
+    email: subscription.payer_email,
+    attempts: attempts || [],
+    provider_events: providerEvents || [],
+  };
 }
 
 async function finishNotification({ notificationKey, success, errorMessage = null }) {
@@ -1045,7 +1178,7 @@ async function fetchPreapproval({ token, preapprovalId }) {
       token,
     });
   } catch (error) {
-    if (error.code === 'MERCADO_PAGO_REQUEST_FAILED' && error.details?.provider_status === 404) {
+    if (error.code === 'PROVIDER_UNAVAILABLE' && error.details?.provider_status === 404) {
       return null;
     }
 
@@ -1065,7 +1198,7 @@ export async function createSubscriptionPlan({
   store,
 }) {
   if (user.role !== 'admin') {
-    throw new AppError('Somente admin pode criar plano de assinatura', 403, 'FORBIDDEN');
+    throw new AppError('Somente admin pode criar plano de assinatura', 403, 'FORBIDDEN_ADMIN_ONLY');
   }
 
   const token = ensureMercadoPagoToken(store);
@@ -1074,6 +1207,10 @@ export async function createSubscriptionPlan({
   const finalFrequencyType = sanitizeFrequencyType(frequencyType, 'months');
   const finalReason = normalizeNullable(reason) || 'Plano de assinatura';
   const finalBackUrl = normalizeNullable(backUrl) || normalizeNullable(process.env.MP_SUBSCRIPTION_BACK_URL);
+
+  if (!finalBackUrl) {
+    throw new AppError('back_url obrigatoria para plano de assinatura', 400, 'VALIDATION_ERROR');
+  }
 
   const created = await mercadoPagoRequest({
     path: '/preapproval_plan',
@@ -1144,6 +1281,10 @@ export async function createSubscription({
   const finalBackUrl = normalizeNullable(backUrl) || normalizeNullable(process.env.MP_SUBSCRIPTION_BACK_URL);
   const externalReference = toSubscriptionExternalReference(user.id);
 
+  if (!finalBackUrl) {
+    throw new AppError('back_url obrigatoria para assinatura', 400, 'VALIDATION_ERROR');
+  }
+
   const created = await mercadoPagoRequest({
     path: '/preapproval',
     method: 'POST',
@@ -1174,8 +1315,36 @@ export async function createSubscription({
     cardTokenLast4: created?.card_id ? String(created.card_id).slice(-4) : null,
   });
 
-  return {
+  await createSubscriptionAttempt({
+    subscriptionId: subscription.id,
+    status: created?.status || finalStatus,
+    providerStatus: created?.status,
+    message: 'Assinatura criada',
+    amount: null,
+  });
+
+  await createSubscriptionProviderEvent({
+    subscriptionId: subscription.id,
+    eventKey: `create:${subscription.mp_preapproval_id}`,
+    type: 'subscription_created',
+    status: created?.status || finalStatus,
+    message: 'Assinatura criada via backend',
+    payload: created,
+  });
+
+  const plan = await getPlanByMpId(subscription.mp_plan_id);
+  const attempts = await listSubscriptionAttempts(subscription.id);
+  const providerEvents = await listSubscriptionProviderEvents(subscription.id);
+
+  const contract = mapSubscriptionContract({
     subscription,
+    plan,
+    attempts,
+    providerEvents,
+  });
+
+  return {
+    subscription: contract,
     provider: {
       id: created?.id || null,
       status: created?.status || null,
@@ -1193,14 +1362,23 @@ export async function getSubscriptionStatus({ reference, user, store }) {
   }
 
   if (user.role !== 'admin' && local.user_id !== user.id) {
-    throw new AppError('Sem permissao para consultar esta assinatura', 403, 'FORBIDDEN');
+    throw new AppError('Sem permissao para consultar esta assinatura', 403, 'FORBIDDEN_ADMIN_ONLY');
   }
 
   const provider = await fetchPreapproval({ token, preapprovalId: local.mp_preapproval_id });
 
   if (!provider) {
+    const plan = await getPlanByMpId(local.mp_plan_id);
+    const attempts = await listSubscriptionAttempts(local.id);
+    const providerEvents = await listSubscriptionProviderEvents(local.id);
+
     return {
-      subscription: local,
+      subscription: mapSubscriptionContract({
+        subscription: local,
+        plan,
+        attempts,
+        providerEvents,
+      }),
       provider: null,
     };
   }
@@ -1219,8 +1397,40 @@ export async function getSubscriptionStatus({ reference, user, store }) {
     cardTokenLast4: local.card_token_last4,
   });
 
+  await createSubscriptionProviderEvent({
+    subscriptionId: updated.id,
+    eventKey: `status:${updated.mp_preapproval_id}:${provider?.status}:${provider?.next_payment_date || ''}`,
+    type: 'subscription_status_sync',
+    status: provider?.status,
+    message: 'Sincronizacao de status via consulta',
+    payload: provider,
+  });
+
+  const hasStatusChange =
+    normalizeSubscriptionStatus(local.status) !== normalizeSubscriptionStatus(updated.status)
+    || String(local.provider_status || '') !== String(updated.provider_status || '');
+
+  if (hasStatusChange) {
+    await createSubscriptionAttempt({
+      subscriptionId: updated.id,
+      status: provider?.status || updated.status,
+      providerStatus: provider?.status,
+      message: 'Atualizacao de status via polling',
+      amount: null,
+    });
+  }
+
+  const plan = await getPlanByMpId(updated.mp_plan_id);
+  const attempts = await listSubscriptionAttempts(updated.id);
+  const providerEvents = await listSubscriptionProviderEvents(updated.id);
+
   return {
-    subscription: updated,
+    subscription: mapSubscriptionContract({
+      subscription: updated,
+      plan,
+      attempts,
+      providerEvents,
+    }),
     provider: {
       id: provider?.id || null,
       status: provider?.status || null,
@@ -1238,7 +1448,11 @@ export async function cancelSubscription({ reference, user, store }) {
   }
 
   if (user.role !== 'admin' && local.user_id !== user.id) {
-    throw new AppError('Sem permissao para cancelar esta assinatura', 403, 'FORBIDDEN');
+    throw new AppError('Sem permissao para cancelar esta assinatura', 403, 'FORBIDDEN_ADMIN_ONLY');
+  }
+
+  if (normalizeSubscriptionStatus(local.status) === 'canceled') {
+    throw new AppError('Assinatura ja cancelada', 409, 'SUBSCRIPTION_ALREADY_CANCELED');
   }
 
   const canceled = await mercadoPagoRequest({
@@ -1255,15 +1469,41 @@ export async function cancelSubscription({ reference, user, store }) {
     mpPlanId: canceled?.preapproval_plan_id || local.mp_plan_id,
     externalReference: canceled?.external_reference || local.external_reference,
     reason: canceled?.reason || local.reason,
-    status: canceled?.status || 'cancelled',
-    providerStatus: canceled?.status || 'cancelled',
+    status: canceled?.status || 'canceled',
+    providerStatus: canceled?.status || 'canceled',
     nextPaymentDate: canceled?.next_payment_date || local.next_payment_date,
     backUrl: canceled?.back_url || local.back_url,
     cardTokenLast4: local.card_token_last4,
   });
 
+  await createSubscriptionAttempt({
+    subscriptionId: updated.id,
+    status: 'canceled',
+    providerStatus: canceled?.status || 'canceled',
+    message: 'Assinatura cancelada',
+    amount: null,
+  });
+
+  await createSubscriptionProviderEvent({
+    subscriptionId: updated.id,
+    eventKey: `cancel:${updated.mp_preapproval_id}`,
+    type: 'subscription_canceled',
+    status: canceled?.status || 'canceled',
+    message: 'Cancelamento solicitado no backend',
+    payload: canceled,
+  });
+
+  const plan = await getPlanByMpId(updated.mp_plan_id);
+  const attempts = await listSubscriptionAttempts(updated.id);
+  const providerEvents = await listSubscriptionProviderEvents(updated.id);
+
   return {
-    subscription: updated,
+    subscription: mapSubscriptionContract({
+      subscription: updated,
+      plan,
+      attempts,
+      providerEvents,
+    }),
     canceled: true,
   };
 }
@@ -1301,7 +1541,7 @@ async function processNotification({ source, queryParams, body, store }) {
       if (preapproval) {
         const userIdFromReference = fromSubscriptionExternalReference(preapproval?.external_reference);
 
-        await upsertSubscriptionFromProvider({
+        const updatedSubscription = await upsertSubscriptionFromProvider({
           mpPreapprovalId: String(preapproval?.id || resourceId),
           userId: userIdFromReference,
           payerEmail: preapproval?.payer_email,
@@ -1313,6 +1553,27 @@ async function processNotification({ source, queryParams, body, store }) {
           nextPaymentDate: preapproval?.next_payment_date,
           backUrl: preapproval?.back_url,
           cardTokenLast4: null,
+        });
+
+        await createSubscriptionProviderEvent({
+          subscriptionId: updatedSubscription.id,
+          eventKey: `${source}:preapproval:${resourceId}:${action || 'update'}`,
+          type: 'preapproval_notification',
+          status: preapproval?.status,
+          message: `Notificacao ${source} de assinatura`,
+          payload: {
+            queryParams,
+            body,
+            preapproval,
+          },
+        });
+
+        await createSubscriptionAttempt({
+          subscriptionId: updatedSubscription.id,
+          status: preapproval?.status,
+          providerStatus: preapproval?.status,
+          message: `Atualizacao via ${source}`,
+          amount: null,
         });
       }
 
