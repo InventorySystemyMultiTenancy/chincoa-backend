@@ -1,9 +1,11 @@
 import { Router } from 'express';
 
 import {
+  getAdminSubscriptionPlans,
   getPublicSubscriptionPlans,
   getSubscription,
   getStatus,
+  patchAdminSubscriptionPlan,
   postCancelSubscription,
   postCancel,
   postCreateSubscription,
@@ -13,7 +15,7 @@ import {
   postMercadoPagoIpn,
   postMercadoPagoWebhook,
 } from '../controllers/paymentController.js';
-import { requireAuth } from '../middlewares/authMiddleware.js';
+import { requireAdmin, requireAuth } from '../middlewares/authMiddleware.js';
 import { resolvePaymentStore } from '../middlewares/paymentStoreMiddleware.js';
 
 const router = Router();
@@ -28,7 +30,9 @@ router.post('/create-pix', requireAuth, postCreatePix);
 router.post('/create-point', requireAuth, postCreatePoint);
 router.post('/create', requireAuth, postCreatePoint);
 
-router.post('/subscriptions/plans', requireAuth, postCreateSubscriptionPlan);
+router.get('/subscriptions/plans', requireAuth, requireAdmin, getAdminSubscriptionPlans);
+router.post('/subscriptions/plans', requireAuth, requireAdmin, postCreateSubscriptionPlan);
+router.patch('/subscriptions/plans/:reference', requireAuth, requireAdmin, patchAdminSubscriptionPlan);
 router.post('/subscriptions', requireAuth, postCreateSubscription);
 router.get('/subscriptions/:reference', requireAuth, getSubscription);
 router.post('/subscriptions/:reference/cancel', requireAuth, postCancelSubscription);

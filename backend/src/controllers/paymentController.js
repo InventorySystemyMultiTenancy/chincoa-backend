@@ -7,7 +7,9 @@ import {
   createPixPayment,
   createPointPayment,
   getSubscriptionStatus,
+  listAdminSubscriptionPlans,
   listPublicSubscriptionPlans,
+  setSubscriptionPlanActive,
   processIpnNotification,
   processWebhookNotification,
 } from '../services/paymentService.js';
@@ -167,6 +169,33 @@ export async function getPublicSubscriptionPlans(req, res, next) {
   try {
     const plans = await listPublicSubscriptionPlans();
     return sendSuccess(res, 200, { plans });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getAdminSubscriptionPlans(req, res, next) {
+  try {
+    const plans = await listAdminSubscriptionPlans();
+    return sendSuccess(res, 200, { plans });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function patchAdminSubscriptionPlan(req, res, next) {
+  try {
+    if (req.body.is_active === undefined) {
+      throw new AppError('Campo is_active obrigatorio', 400, 'VALIDATION_ERROR');
+    }
+
+    const plan = await setSubscriptionPlanActive({
+      reference: req.params.reference,
+      isActive: req.body.is_active,
+      user: req.user,
+    });
+
+    return sendSuccess(res, 200, { plan });
   } catch (error) {
     return next(error);
   }

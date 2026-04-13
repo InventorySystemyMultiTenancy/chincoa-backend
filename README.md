@@ -135,6 +135,8 @@ Regra promocional:
 - POST `/api/payments/ipn/mercadopago` (sem auth)
 - POST `/api/payments/webhooks/mercadopago` (sem auth)
 - POST `/api/payments/subscriptions/plans` (auth admin)
+- GET `/api/payments/subscriptions/plans` (auth admin)
+- PATCH `/api/payments/subscriptions/plans/:reference` (auth admin)
 - GET `/api/payments/subscriptions/plans/public` (publico)
 - POST `/api/payments/subscriptions` (auth)
 - GET `/api/payments/subscriptions/:reference` (auth)
@@ -151,6 +153,7 @@ Assinaturas recorrentes:
 - webhook de `preapproval/subscription` atualiza o status local da assinatura
 - frontend deve consumir o catalogo em `GET /api/payments/subscriptions/plans/public` para obter `preapproval_plan_id`
 - `POST /api/payments/subscriptions` valida se o `preapproval_plan_id` existe e esta ativo no backend
+- painel admin pode criar plano mensal em `POST /api/payments/subscriptions/plans` com `frequency=1` e `frequency_type=months`
 
 ## Janela movel de agendamento
 

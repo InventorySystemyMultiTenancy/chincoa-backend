@@ -621,6 +621,90 @@ export async function listPublicSubscriptionPlans() {
   return result.rows.map(mapPublicPlanContract);
 }
 
+function mapAdminPlanContract(plan) {
+  return {
+    id: plan.id,
+    name: plan.name,
+    description: plan.description || null,
+    reason: plan.reason || null,
+    transaction_amount: Number(plan.transaction_amount),
+    frequency: Number(plan.frequency),
+    frequency_type: plan.frequency_type,
+    currency_id: plan.currency_id,
+    preapproval_plan_id: plan.mp_plan_id,
+    is_active: Boolean(plan.is_active),
+    provider_status: plan.status || null,
+    created_at: plan.created_at,
+    updated_at: plan.updated_at,
+  };
+}
+
+export async function listAdminSubscriptionPlans() {
+  const result = await query(
+    `
+      SELECT
+        id,
+        name,
+        description,
+        reason,
+        transaction_amount,
+        frequency,
+        frequency_type,
+        currency_id,
+        mp_plan_id,
+        is_active,
+        status,
+        created_at,
+        updated_at
+      FROM subscription_plans
+      ORDER BY created_at DESC
+    `,
+  );
+
+  return result.rows.map(mapAdminPlanContract);
+}
+
+export async function setSubscriptionPlanActive({ reference, isActive, user }) {
+  if (user.role !== 'admin') {
+    throw new AppError('Somente admin pode atualizar plano de assinatura', 403, 'FORBIDDEN_ADMIN_ONLY');
+  }
+
+  const normalizedReference = normalizeNullable(reference);
+
+  if (!normalizedReference) {
+    throw new AppError('Referencia do plano obrigatoria', 400, 'VALIDATION_ERROR');
+  }
+
+  const result = await query(
+    `
+      UPDATE subscription_plans
+      SET is_active = $2, updated_at = NOW()
+      WHERE id::text = $1 OR mp_plan_id = $1
+      RETURNING
+        id,
+        name,
+        description,
+        reason,
+        transaction_amount,
+        frequency,
+        frequency_type,
+        currency_id,
+        mp_plan_id,
+        is_active,
+        status,
+        created_at,
+        updated_at
+    `,
+    [normalizedReference, Boolean(isActive)],
+  );
+
+  if (result.rowCount === 0) {
+    throw new AppError('Plano de assinatura nao encontrado', 404, 'SUBSCRIPTION_PLAN_NOT_FOUND');
+  }
+
+  return mapAdminPlanContract(result.rows[0]);
+}
+
 async function findActivePlanByMpId(preapprovalPlanId) {
   const result = await query(
     `
