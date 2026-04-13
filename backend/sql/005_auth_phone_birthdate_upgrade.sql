@@ -7,7 +7,7 @@ ALTER TABLE users
   ADD COLUMN IF NOT EXISTS birth_date DATE;
 
 UPDATE users
-SET phone = regexp_replace(COALESCE(phone, ''), '\\D', '', 'g');
+SET phone = regexp_replace(COALESCE(phone, ''), '\D', '', 'g');
 
 WITH ranked_users AS (
   SELECT
@@ -41,39 +41,3 @@ BEGIN
     WHERE id = duplicate_phone.id;
   END LOOP;
 END $$;
-
-ALTER TABLE users
-  ALTER COLUMN phone SET NOT NULL;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_indexes
-    WHERE schemaname = 'public'
-      AND tablename = 'users'
-      AND indexname = 'users_phone_key'
-  ) THEN
-    CREATE UNIQUE INDEX users_phone_key ON users (phone);
-  END IF;
-END $$;
-
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conrelid = 'users'::regclass
-      AND conname = 'users_email_key'
-      AND contype IN ('u', 'p')
-  ) THEN
-    ALTER TABLE users DROP CONSTRAINT users_email_key;
-  END IF;
-END $$;
-
-DROP INDEX IF EXISTS users_email_key;
-DROP INDEX IF EXISTS uq_users_email_not_null;
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_not_null
-  ON users (lower(email))
-  WHERE email IS NOT NULL;
