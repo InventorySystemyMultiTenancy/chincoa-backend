@@ -247,3 +247,110 @@ export async function deleteBusinessDay(id) {
     throw new AppError('Dia nao encontrado', 404, 'NOT_FOUND');
   }
 }
+
+export async function listBusinessDayHours({ date = null, from = null, to = null }) {
+  const params = [];
+  let where = '';
+
+  if (date) {
+    params.push(date);
+    where = 'WHERE date = $1';
+  } else if (from && to) {
+    params.push(from, to);
+    where = 'WHERE date BETWEEN $1 AND $2';
+  } else if (from) {
+    params.push(from);
+    where = 'WHERE date >= $1';
+  } else if (to) {
+    params.push(to);
+    where = 'WHERE date <= $1';
+  }
+
+  const result = await query(
+    `
+      SELECT id, date, slot_time, is_enabled, reason, created_at, updated_at
+      FROM business_day_hour_overrides
+      ${where}
+      ORDER BY date ASC, slot_time ASC
+    `,
+    params,
+  );
+
+  return result.rows.map((row) => ({
+    ...row,
+    time: String(row.slot_time).slice(0, 5),
+  }));
+}
+
+export async function createBusinessDayHour({ date, time, isEnabled = true, reason = null }) {
+  const result = await query(
+    `
+      INSERT INTO business_day_hour_overrides (date, slot_time, is_enabled, reason)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (date, slot_time)
+      DO UPDATE SET
+        is_enabled = EXCLUDED.is_enabled,
+        reason = EXCLUDED.reason,
+        updated_at = NOW()
+      RETURNING id, date, slot_time, is_enabled, reason, created_at, updated_at
+    `,
+    [date, time, isEnabled, reason],
+  );
+
+  return {
+    ...result.rows[0],
+    time: String(result.rows[0].slot_time).slice(0, 5),
+  };
+}
+
+export async function updateBusinessDayHour({ id, date, time, isEnabled, reason }) {
+  const current = await query(
+    `
+      SELECT id, date, slot_time, is_enabled, reason, created_at, updated_at
+      FROM business_day_hour_overrides
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [id],
+  );
+
+  if (current.rowCount === 0) {
+    throw new AppError('Horario do dia nao encontrado', 404, 'NOT_FOUND');
+  }
+
+  const existing = current.rows[0];
+  const nextDate = date ?? existing.date;
+  const nextTime = time ?? String(existing.slot_time).slice(0, 5);
+  const nextIsEnabled = isEnabled ?? existing.is_enabled;
+  const nextReason = reason !== undefined ? reason : existing.reason;
+
+  const result = await query(
+    `
+      UPDATE business_day_hour_overrides
+      SET date = $2, slot_time = $3, is_enabled = $4, reason = $5, updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, date, slot_time, is_enabled, reason, created_at, updated_at
+    `,
+    [id, nextDate, nextTime, nextIsEnabled, nextReason],
+  );
+
+  return {
+    ...result.rows[0],
+    time: String(result.rows[0].slot_time).slice(0, 5),
+  };
+}
+
+export async function deleteBusinessDayHour(id) {
+  const result = await query(
+    `
+      DELETE FROM business_day_hour_overrides
+      WHERE id = $1
+      RETURNING id
+    `,
+    [id],
+  );
+
+  if (result.rowCount === 0) {
+    throw new AppError('Horario do dia nao encontrado', 404, 'NOT_FOUND');
+  }
+}

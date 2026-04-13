@@ -5,12 +5,16 @@ import {
 } from '../services/adminService.js';
 import {
   createBusinessDay,
+  createBusinessDayHour,
   createBusinessHour,
   deleteBusinessDay,
+  deleteBusinessDayHour,
   deleteBusinessHour,
   listBusinessDays,
+  listBusinessDayHours,
   listBusinessHours,
   updateBusinessDay,
+  updateBusinessDayHour,
   updateBusinessHour,
 } from '../services/scheduleAdminService.js';
 import {
@@ -271,6 +275,88 @@ export async function removeScheduleDay(req, res, next) {
   try {
     await deleteBusinessDay(req.params.id);
     return sendSuccess(res, 200, { message: 'Dia removido com sucesso' });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getScheduleDayHours(req, res, next) {
+  try {
+    const date = req.query.date ? String(req.query.date).trim() : null;
+    const from = req.query.from ? String(req.query.from).trim() : null;
+    const to = req.query.to ? String(req.query.to).trim() : null;
+
+    if (date) {
+      validateDate(date);
+    }
+
+    if (from) {
+      validateDate(from);
+    }
+
+    if (to) {
+      validateDate(to);
+    }
+
+    const dayHours = await listBusinessDayHours({ date, from, to });
+    return sendSuccess(res, 200, { day_hours: dayHours });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function postScheduleDayHour(req, res, next) {
+  try {
+    requireFields(req.body, ['date', 'time']);
+
+    const date = String(req.body.date).trim();
+    const time = String(req.body.time).trim();
+    const isEnabled = req.body.isEnabled !== undefined ? Boolean(req.body.isEnabled) : true;
+    const reason = req.body.reason ? String(req.body.reason).trim() : null;
+
+    validateDate(date);
+    validateTime(time);
+
+    const dayHour = await createBusinessDayHour({ date, time, isEnabled, reason });
+    return sendSuccess(res, 201, { day_hour: dayHour });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function patchScheduleDayHour(req, res, next) {
+  try {
+    const payload = {};
+
+    if (req.body.date !== undefined) {
+      payload.date = String(req.body.date).trim();
+      validateDate(payload.date);
+    }
+
+    if (req.body.time !== undefined) {
+      payload.time = String(req.body.time).trim();
+      validateTime(payload.time);
+    }
+
+    if (req.body.isEnabled !== undefined) {
+      payload.isEnabled = Boolean(req.body.isEnabled);
+    }
+
+    if (req.body.reason !== undefined) {
+      payload.reason = req.body.reason ? String(req.body.reason).trim() : null;
+    }
+
+    const dayHour = await updateBusinessDayHour({ id: req.params.id, ...payload });
+    return sendSuccess(res, 200, { day_hour: dayHour });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function removeScheduleDayHour(req, res, next) {
+  try {
+    await deleteBusinessDayHour(req.params.id);
+    return sendSuccess(res, 200, { message: 'Horario do dia removido com sucesso' });
   } catch (error) {
     return next(error);
   }

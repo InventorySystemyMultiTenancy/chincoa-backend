@@ -98,7 +98,7 @@ FROM (
   FROM generate_series(0, 6) AS w
   CROSS JOIN generate_series(
     '2000-01-01 09:00:00'::timestamp,
-    '2000-01-01 18:00:00'::timestamp,
+    '2000-01-01 22:00:00'::timestamp,
     '1 hour'::interval
   ) AS gs
 ) source

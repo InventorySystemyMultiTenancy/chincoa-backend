@@ -8,18 +8,22 @@ import {
   getFinancialReportSummary,
   getFixedExpenses,
   getScheduleDays,
+  getScheduleDayHours,
   getScheduleHours,
   getVariableExpenses,
   listAppointments,
   patchScheduleDay,
+  patchScheduleDayHour,
   patchScheduleHour,
   patchAppointmentStatus,
   postFixedExpense,
   postScheduleDay,
+  postScheduleDayHour,
   postScheduleHour,
   postVariableExpense,
   removeAppointment,
   removeScheduleDay,
+  removeScheduleDayHour,
   removeScheduleHour,
 } from '../controllers/adminController.js';
 import { requireAdmin, requireAuth } from '../middlewares/authMiddleware.js';
@@ -54,5 +58,10 @@ router.get('/schedule/days', getScheduleDays);
 router.post('/schedule/days', postScheduleDay);
 router.patch('/schedule/days/:id', patchScheduleDay);
 router.delete('/schedule/days/:id', removeScheduleDay);
+
+router.get('/schedule/day-hours', getScheduleDayHours);
+router.post('/schedule/day-hours', postScheduleDayHour);
+router.patch('/schedule/day-hours/:id', patchScheduleDayHour);
+router.delete('/schedule/day-hours/:id', removeScheduleDayHour);
 
 export default router;

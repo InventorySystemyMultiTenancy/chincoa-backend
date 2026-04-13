@@ -64,6 +64,20 @@ async function getHoursByWeekday(weekday, barberId) {
   return result.rows;
 }
 
+async function getDayHourOverrides(dateString) {
+  const result = await query(
+    `
+      SELECT id, date, slot_time, is_enabled, reason
+      FROM business_day_hour_overrides
+      WHERE date = $1
+      ORDER BY slot_time ASC
+    `,
+    [dateString],
+  );
+
+  return result.rows;
+}
+
 async function assertActiveBarberExists(barberId) {
   const result = await query(
     `
@@ -108,7 +122,7 @@ function minutesToHourMinute(totalMinutes) {
   return `${hours}:${minutes}`;
 }
 
-function getSlotDecision({ dateString, timeString, dayOverride, hour, existing }) {
+function getSlotDecision({ dateString, timeString, dayOverride, dayHourOverride, hour, existing }) {
   const time = normalizeTime(timeString);
   const timeContext = isPastSlotByBusinessTimezone(dateString, time);
 
@@ -130,7 +144,18 @@ function getSlotDecision({ dateString, timeString, dayOverride, hour, existing }
     };
   }
 
-  if (!hour) {
+  if (dayHourOverride && !dayHourOverride.is_enabled) {
+    return {
+      status: 'desabilitado',
+      reason: dayHourOverride.reason || 'Horario desabilitado pelo admin para este dia',
+      code: 'DAY_HOUR_DISABLED',
+      timeContext,
+    };
+  }
+
+  const hasManualEnableOverride = Boolean(dayHourOverride && dayHourOverride.is_enabled);
+
+  if (!hour && !hasManualEnableOverride) {
     return {
       status: 'desabilitado',
       reason: 'Horario nao cadastrado para este dia da semana',
@@ -139,7 +164,7 @@ function getSlotDecision({ dateString, timeString, dayOverride, hour, existing }
     };
   }
 
-  if (hour.is_booked_week) {
+  if (hour && hour.is_booked_week) {
     return {
       status: existing?.status || 'agendado',
       reason: 'Horario ja agendado nesta semana',
@@ -290,6 +315,19 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
 
   const hour = hourResult.rowCount > 0 ? hourResult.rows[0] : null;
 
+  const dayHourOverrideResult = await client.query(
+    `
+      SELECT id, date, slot_time, is_enabled, reason
+      FROM business_day_hour_overrides
+      WHERE date = $1 AND slot_time = $2
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [dateString, normalizedTime],
+  );
+
+  const dayHourOverride = dayHourOverrideResult.rowCount > 0 ? dayHourOverrideResult.rows[0] : null;
+
   const existingResult = await client.query(
     `
       SELECT id, user_id, barber_id, appointment_date, appointment_time, service_type, status, price
@@ -307,6 +345,7 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
     dateString,
     timeString: normalizedTime,
     dayOverride,
+    dayHourOverride,
     hour,
     existing,
   });
@@ -346,6 +385,14 @@ async function assertSlotEnabledForBookingWithClient(client, dateString, timeStr
   if (decision.code === 'DAY_DISABLED') {
     throw new AppError('Dia desabilitado para atendimento', 400, 'DAY_DISABLED', {
       date: dateString,
+      reason: decision.reason,
+    });
+  }
+
+  if (decision.code === 'DAY_HOUR_DISABLED') {
+    throw new AppError('Horario desabilitado manualmente para este dia', 400, 'DAY_HOUR_DISABLED', {
+      date: dateString,
+      time: normalizedTime,
       reason: decision.reason,
     });
   }
@@ -413,23 +460,51 @@ export async function listSlotsByDate(appointmentDate, barberId) {
     };
   }
 
-  const [dayOverride, hours, booked] = await Promise.all([
+  const [dayOverride, hours, dayHourOverrides, booked] = await Promise.all([
     getDayOverride(appointmentDate),
     getHoursByWeekday(weekday, barberId),
+    getDayHourOverrides(appointmentDate),
     getBookedAppointmentsByDate(appointmentDate, barberId),
   ]);
+
+  const dayOverrideByTime = new Map(
+    dayHourOverrides.map((item) => [normalizeTime(item.slot_time), item]),
+  );
+
+  const mergedHoursByTime = new Map(
+    hours.map((hour) => [normalizeTime(hour.slot_time), hour]),
+  );
+
+  for (const override of dayHourOverrides) {
+    const time = normalizeTime(override.slot_time);
+
+    if (!mergedHoursByTime.has(time)) {
+      mergedHoursByTime.set(time, {
+        id: null,
+        weekday,
+        slot_time: time,
+        is_booked_week: false,
+      });
+    }
+  }
+
+  const mergedHours = Array.from(mergedHoursByTime.values()).sort((a, b) =>
+    normalizeTime(a.slot_time).localeCompare(normalizeTime(b.slot_time)),
+  );
 
   const bookedByTime = new Map(
     booked.map((item) => [normalizeTime(item.appointment_time), item]),
   );
 
-  const slots = hours.map((hour) => {
+  const slots = mergedHours.map((hour) => {
     const time = normalizeTime(hour.slot_time);
     const existing = bookedByTime.get(time);
+    const dayHourOverride = dayOverrideByTime.get(time) || null;
     const decision = getSlotDecision({
       dateString: appointmentDate,
       timeString: time,
       dayOverride,
+      dayHourOverride,
       hour,
       existing,
     });
@@ -444,6 +519,7 @@ export async function listSlotsByDate(appointmentDate, barberId) {
     if (decision.status === 'desabilitado') {
       return {
         id: hour.id,
+        day_hour_override_id: dayHourOverride?.id || null,
         appointment_id: null,
         user_id: null,
         barber_id: barber.id,
@@ -458,6 +534,7 @@ export async function listSlotsByDate(appointmentDate, barberId) {
     if (decision.status === 'disponivel') {
       return {
         id: hour.id,
+        day_hour_override_id: dayHourOverride?.id || null,
         appointment_id: null,
         user_id: null,
         barber_id: barber.id,
@@ -471,6 +548,7 @@ export async function listSlotsByDate(appointmentDate, barberId) {
 
     return {
       id: hour.id,
+      day_hour_override_id: dayHourOverride?.id || null,
       appointment_id: existing?.id || null,
       user_id: existing?.user_id || null,
       barber_id: existing?.barber_id || barber.id,

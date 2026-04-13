@@ -57,6 +57,14 @@ export async function runRollingScheduleMaintenance() {
 
     await client.query(
       `
+        DELETE FROM business_day_hour_overrides
+        WHERE date < $1 OR date > $2
+      `,
+      [window.retentionStartDate, window.bookingEndDate],
+    );
+
+    await client.query(
+      `
         INSERT INTO business_days (date, is_enabled, reason)
         SELECT d::date, true, NULL
         FROM generate_series($1::date, $2::date, '1 day'::interval) AS d
