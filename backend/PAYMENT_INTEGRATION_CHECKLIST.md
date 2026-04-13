@@ -1,6 +1,6 @@
 # Checklist de Validacao Mercado Pago
 
-## Pre-requisitos
+## Pre-requisitoss
 
 - `MP_ACCESS_TOKEN` configurado.
 - `MP_DEVICE_ID` configurado para testes de Point.
