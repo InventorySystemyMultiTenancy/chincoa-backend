@@ -276,17 +276,34 @@ CREATE INDEX IF NOT EXISTS idx_appointments_status
 CREATE INDEX IF NOT EXISTS idx_business_days_date
   ON business_days (date);
 
-INSERT INTO business_hours (weekday, slot_time)
-SELECT weekday, slot_time
-FROM (
-  SELECT
-    w AS weekday,
-    gs::time AS slot_time
-  FROM generate_series(0, 6) AS w
-  CROSS JOIN generate_series(
-    '2000-01-01 09:00:00'::timestamp,
-    '2000-01-01 22:00:00'::timestamp,
-    '1 hour'::interval
-  ) AS gs
-) source
-ON CONFLICT (weekday, slot_time) DO NOTHING;
+DO $$
+BEGIN
+  -- Evita falha em bancos que ja evoluiram para grade por barbeiro.
+  IF NOT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'business_hours'
+      AND column_name = 'barber_id'
+  ) THEN
+    INSERT INTO business_hours (weekday, slot_time)
+    SELECT source.weekday, source.slot_time
+    FROM (
+      SELECT
+        w AS weekday,
+        gs::time AS slot_time
+      FROM generate_series(0, 6) AS w
+      CROSS JOIN generate_series(
+        '2000-01-01 09:00:00'::timestamp,
+        '2000-01-01 22:00:00'::timestamp,
+        '1 hour'::interval
+      ) AS gs
+    ) source
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM business_hours bh
+      WHERE bh.weekday = source.weekday
+        AND bh.slot_time = source.slot_time
+    );
+  END IF;
+END $$;

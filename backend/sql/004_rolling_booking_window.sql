@@ -12,7 +12,11 @@ WHERE date < (CURRENT_DATE - INTERVAL '60 days')::date
 INSERT INTO business_days (date, is_enabled, reason)
 SELECT d::date, true, NULL
 FROM generate_series(CURRENT_DATE, CURRENT_DATE + INTERVAL '15 days', '1 day'::interval) AS d
-ON CONFLICT (date) DO NOTHING;
+WHERE NOT EXISTS (
+   SELECT 1
+   FROM business_days bd
+   WHERE bd.date = d::date
+);
 
 INSERT INTO system_settings (setting_key, setting_value)
 VALUES ('rolling_booking_window_last_run_date', CURRENT_DATE::text)
