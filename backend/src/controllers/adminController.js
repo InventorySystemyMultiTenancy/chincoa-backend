@@ -23,6 +23,8 @@ import {
   getFinancialReport,
   listFixedExpenses,
   listVariableExpenses,
+  updateFixedExpense,
+  updateVariableExpense,
 } from '../services/reportingService.js';
 import {
   createBarber,
@@ -426,6 +428,45 @@ export async function postFixedExpense(req, res, next) {
   }
 }
 
+export async function patchFixedExpense(req, res, next) {
+  try {
+    validateUuid(req.params.id, 'fixed_expense_id');
+
+    if (
+      req.body.title === undefined
+      && req.body.amount === undefined
+      && req.body.starts_on === undefined
+      && req.body.ends_on === undefined
+      && req.body.is_active === undefined
+      && req.body.notes === undefined
+    ) {
+      throw new AppError('Nenhum campo informado para atualizacao', 400, 'VALIDATION_ERROR');
+    }
+
+    if (req.body.starts_on !== undefined) {
+      validateDate(String(req.body.starts_on).trim());
+    }
+
+    if (req.body.ends_on !== undefined && req.body.ends_on) {
+      validateDate(String(req.body.ends_on).trim());
+    }
+
+    const fixedExpense = await updateFixedExpense({
+      id: req.params.id,
+      title: req.body.title,
+      amount: req.body.amount,
+      startsOn: req.body.starts_on,
+      endsOn: req.body.ends_on,
+      isActive: req.body.is_active,
+      notes: req.body.notes,
+    });
+
+    return sendSuccess(res, 200, { fixed_expense: fixedExpense });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 export async function getVariableExpenses(req, res, next) {
   try {
     const startDate = req.query.startDate || req.query.start_date || null;
@@ -465,6 +506,37 @@ export async function postVariableExpense(req, res, next) {
     });
 
     return sendSuccess(res, 201, { variable_expense: variableExpense });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function patchVariableExpense(req, res, next) {
+  try {
+    validateUuid(req.params.id, 'variable_expense_id');
+
+    if (
+      req.body.title === undefined
+      && req.body.amount === undefined
+      && req.body.expense_date === undefined
+      && req.body.notes === undefined
+    ) {
+      throw new AppError('Nenhum campo informado para atualizacao', 400, 'VALIDATION_ERROR');
+    }
+
+    if (req.body.expense_date !== undefined) {
+      validateDate(String(req.body.expense_date).trim());
+    }
+
+    const variableExpense = await updateVariableExpense({
+      id: req.params.id,
+      title: req.body.title,
+      amount: req.body.amount,
+      expenseDate: req.body.expense_date,
+      notes: req.body.notes,
+    });
+
+    return sendSuccess(res, 200, { variable_expense: variableExpense });
   } catch (error) {
     return next(error);
   }

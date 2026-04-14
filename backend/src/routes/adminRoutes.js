@@ -15,6 +15,8 @@ import {
   patchScheduleDay,
   patchScheduleDayHour,
   patchScheduleHour,
+  patchFixedExpense,
+  patchVariableExpense,
   patchAppointmentStatus,
   postFixedExpense,
   postScheduleDay,
@@ -45,9 +47,11 @@ router.get('/reports/financial', getFinancialReportSummary);
 
 router.get('/expenses/fixed', getFixedExpenses);
 router.post('/expenses/fixed', postFixedExpense);
+router.patch('/expenses/fixed/:id', patchFixedExpense);
 
 router.get('/expenses/variable', getVariableExpenses);
 router.post('/expenses/variable', postVariableExpense);
+router.patch('/expenses/variable/:id', patchVariableExpense);
 
 router.get('/schedule/hours', getScheduleHours);
 router.post('/schedule/hours', postScheduleHour);

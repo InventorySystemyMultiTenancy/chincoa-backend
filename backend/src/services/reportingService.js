@@ -62,6 +62,57 @@ export async function listFixedExpenses() {
   }));
 }
 
+export async function updateFixedExpense({ id, title, amount, startsOn, endsOn, isActive, notes }) {
+  const current = await query(
+    `
+      SELECT id, title, amount, starts_on, ends_on, is_active, notes, created_at, updated_at
+      FROM admin_fixed_expenses
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [id],
+  );
+
+  if (current.rowCount === 0) {
+    throw new AppError('Gasto fixo nao encontrado', 404, 'NOT_FOUND');
+  }
+
+  const existing = current.rows[0];
+
+  const nextTitle = title !== undefined ? String(title || '').trim() : existing.title;
+  if (!nextTitle) {
+    throw new AppError('Titulo do gasto fixo e obrigatorio', 400, 'VALIDATION_ERROR');
+  }
+
+  const nextAmount = amount !== undefined ? normalizeAmount(amount) : Number(existing.amount);
+  const nextStartsOn = startsOn !== undefined ? normalizeDate(startsOn) : existing.starts_on;
+  const nextEndsOn = endsOn !== undefined ? (endsOn ? normalizeDate(endsOn) : null) : existing.ends_on;
+  const nextIsActive = isActive !== undefined ? Boolean(isActive) : existing.is_active;
+  const nextNotes = notes !== undefined ? (notes ? String(notes).trim() : null) : existing.notes;
+
+  const result = await query(
+    `
+      UPDATE admin_fixed_expenses
+      SET
+        title = $2,
+        amount = $3,
+        starts_on = $4,
+        ends_on = $5,
+        is_active = $6,
+        notes = $7,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, title, amount, starts_on, ends_on, is_active, notes, created_at, updated_at
+    `,
+    [id, nextTitle, nextAmount, nextStartsOn, nextEndsOn, nextIsActive, nextNotes],
+  );
+
+  return {
+    ...result.rows[0],
+    amount: Number(result.rows[0].amount),
+  };
+}
+
 export async function createVariableExpense({ title, amount, expenseDate, notes }) {
   const normalizedTitle = String(title || '').trim();
   const normalizedDate = normalizeDate(expenseDate);
@@ -116,6 +167,53 @@ export async function listVariableExpenses({ startDate, endDate }) {
     ...row,
     amount: Number(row.amount),
   }));
+}
+
+export async function updateVariableExpense({ id, title, amount, expenseDate, notes }) {
+  const current = await query(
+    `
+      SELECT id, title, amount, expense_date, notes, created_at, updated_at
+      FROM admin_variable_expenses
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [id],
+  );
+
+  if (current.rowCount === 0) {
+    throw new AppError('Gasto variavel nao encontrado', 404, 'NOT_FOUND');
+  }
+
+  const existing = current.rows[0];
+
+  const nextTitle = title !== undefined ? String(title || '').trim() : existing.title;
+  if (!nextTitle) {
+    throw new AppError('Titulo do gasto variavel e obrigatorio', 400, 'VALIDATION_ERROR');
+  }
+
+  const nextAmount = amount !== undefined ? normalizeAmount(amount) : Number(existing.amount);
+  const nextExpenseDate = expenseDate !== undefined ? normalizeDate(expenseDate) : existing.expense_date;
+  const nextNotes = notes !== undefined ? (notes ? String(notes).trim() : null) : existing.notes;
+
+  const result = await query(
+    `
+      UPDATE admin_variable_expenses
+      SET
+        title = $2,
+        amount = $3,
+        expense_date = $4,
+        notes = $5,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING id, title, amount, expense_date, notes, created_at, updated_at
+    `,
+    [id, nextTitle, nextAmount, nextExpenseDate, nextNotes],
+  );
+
+  return {
+    ...result.rows[0],
+    amount: Number(result.rows[0].amount),
+  };
 }
 
 export async function getFinancialReport({ startDate, endDate }) {
