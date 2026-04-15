@@ -26,6 +26,7 @@ import {
   updateFixedExpense,
   updateVariableExpense,
 } from '../services/reportingService.js';
+import { listAdminSubscribers } from '../services/paymentService.js';
 import {
   createBarber,
   disableBarber,
@@ -359,6 +360,22 @@ export async function removeScheduleDayHour(req, res, next) {
   try {
     await deleteBusinessDayHour(req.params.id);
     return sendSuccess(res, 200, { message: 'Horario do dia removido com sucesso' });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getAdminSubscribers(req, res, next) {
+  try {
+    const data = await listAdminSubscribers({
+      status: req.query.status,
+      includeInactive: req.query.include_inactive,
+      search: req.query.search,
+      page: req.query.page,
+      limit: req.query.limit,
+    });
+
+    return sendSuccess(res, 200, data);
   } catch (error) {
     return next(error);
   }

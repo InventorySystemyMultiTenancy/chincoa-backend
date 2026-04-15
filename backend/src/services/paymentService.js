@@ -80,11 +80,11 @@ function normalizePointIntentState(rawState) {
   return 'pending';
 }
 
-function normalizeSubscriptionStatus(rawStatus) {
+function normalizeSubscriptionStatus(rawStatus, fallback = 'pending') {
   const status = String(rawStatus || '').trim().toLowerCase();
 
   if (!status) {
-    return 'pending';
+    return fallback;
   }
 
   if (status === 'authorized' || status === 'active') {
@@ -103,7 +103,271 @@ function normalizeSubscriptionStatus(rawStatus) {
     return 'pending';
   }
 
-  return 'pending';
+  return fallback;
+}
+
+export function mapSubscriptionStatusForFrontend(rawStatus) {
+  return normalizeSubscriptionStatus(rawStatus, 'unknown');
+}
+
+function parseBooleanQuery(value, defaultValue = false) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return defaultValue;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+
+  if (['true', '1', 'yes', 'sim'].includes(normalized)) {
+    return true;
+  }
+
+  if (['false', '0', 'no', 'nao'].includes(normalized)) {
+    return false;
+  }
+
+  throw new AppError('Parametro include_inactive invalido', 422, 'VALIDATION_ERROR');
+}
+
+function parsePagination({ page, limit }) {
+  const parsedPage = Number.parseInt(String(page ?? '1'), 10);
+  const parsedLimit = Number.parseInt(String(limit ?? '50'), 10);
+
+  if (!Number.isInteger(parsedPage) || parsedPage < 1) {
+    throw new AppError('Parametro page invalido', 422, 'VALIDATION_ERROR');
+  }
+
+  if (!Number.isInteger(parsedLimit) || parsedLimit < 1 || parsedLimit > 200) {
+    throw new AppError('Parametro limit invalido', 422, 'VALIDATION_ERROR');
+  }
+
+  return {
+    page: parsedPage,
+    limit: parsedLimit,
+    offset: (parsedPage - 1) * parsedLimit,
+  };
+}
+
+function normalizeAdminSubscriptionStatusFilter(statusRaw) {
+  const normalized = String(statusRaw || '').trim().toLowerCase();
+
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === 'cancelled') {
+    return 'canceled';
+  }
+
+  if (['authorized', 'pending', 'paused', 'canceled', 'all'].includes(normalized)) {
+    return normalized;
+  }
+
+  throw new AppError('Parametro status invalido', 422, 'VALIDATION_ERROR');
+}
+
+function buildNormalizedSubscriptionStatusSql(columnRef) {
+  return `
+    CASE
+      WHEN lower(COALESCE(${columnRef}, '')) IN ('authorized', 'active') THEN 'authorized'
+      WHEN lower(COALESCE(${columnRef}, '')) IN ('pending') THEN 'pending'
+      WHEN lower(COALESCE(${columnRef}, '')) IN ('paused', 'suspended') THEN 'paused'
+      WHEN lower(COALESCE(${columnRef}, '')) IN ('canceled', 'cancelled') THEN 'canceled'
+      ELSE 'unknown'
+    END
+  `;
+}
+
+function mapSubscriberContract(row) {
+  return {
+    user_id: row.user_id,
+    full_name: row.full_name || null,
+    email: row.email || null,
+    phone: row.phone || null,
+    plan_name: row.plan_name || row.reason || null,
+    preapproval_plan_id: row.preapproval_plan_id || null,
+    subscription_id: row.subscription_id || null,
+    status: mapSubscriptionStatusForFrontend(row.status || row.provider_status),
+    transaction_amount: row.transaction_amount === null ? null : Number(row.transaction_amount),
+    currency_id: row.currency_id || null,
+  };
+}
+
+export async function listAdminSubscribers({ status, includeInactive, search, page, limit }) {
+  const statusFilter = normalizeAdminSubscriptionStatusFilter(status);
+  const includeInactiveFilter = parseBooleanQuery(includeInactive, false);
+  const pagination = parsePagination({ page, limit });
+  const searchValue = String(search || '').trim();
+  const params = [];
+  const whereClauses = [];
+
+  if (searchValue) {
+    params.push(`%${searchValue}%`);
+    const searchParamIndex = params.length;
+    whereClauses.push(`(
+      full_name ILIKE $${searchParamIndex}
+      OR email ILIKE $${searchParamIndex}
+      OR phone ILIKE $${searchParamIndex}
+      OR payer_email ILIKE $${searchParamIndex}
+    )`);
+  }
+
+  const normalizedStatusSql = buildNormalizedSubscriptionStatusSql('s.status');
+
+  if (statusFilter && statusFilter !== 'all') {
+    params.push(statusFilter);
+    whereClauses.push(`(${normalizedStatusSql}) = $${params.length}`);
+  } else if (statusFilter === 'all' && !includeInactiveFilter) {
+    whereClauses.push(`(${normalizedStatusSql}) IN ('authorized', 'pending')`);
+  } else if (!statusFilter) {
+    whereClauses.push(`(${normalizedStatusSql}) IN ('authorized', 'pending')`);
+  }
+
+  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+  const rankedBaseSql = `
+    WITH ranked AS (
+      SELECT
+        s.user_id,
+        u.full_name,
+        u.email,
+        u.phone,
+        s.payer_email,
+        COALESCE(p.name, s.reason) AS plan_name,
+        s.reason,
+        COALESCE(s.mp_plan_id, p.mp_plan_id) AS preapproval_plan_id,
+        s.mp_preapproval_id AS subscription_id,
+        ${normalizedStatusSql} AS status,
+        s.provider_status,
+        COALESCE(p.transaction_amount, NULL) AS transaction_amount,
+        COALESCE(p.currency_id, 'BRL') AS currency_id,
+        ROW_NUMBER() OVER (
+          PARTITION BY s.user_id
+          ORDER BY
+            CASE
+              WHEN (${normalizedStatusSql}) = 'authorized' THEN 1
+              WHEN (${normalizedStatusSql}) = 'pending' THEN 2
+              WHEN (${normalizedStatusSql}) = 'paused' THEN 3
+              WHEN (${normalizedStatusSql}) = 'canceled' THEN 4
+              ELSE 5
+            END,
+            s.updated_at DESC,
+            s.created_at DESC
+        ) AS rn
+      FROM subscriptions s
+      LEFT JOIN users u ON u.id = s.user_id
+      LEFT JOIN subscription_plans p ON p.mp_plan_id = s.mp_plan_id
+      WHERE s.user_id IS NOT NULL
+    ),
+    dedup AS (
+      SELECT *
+      FROM ranked
+      WHERE rn = 1
+    )
+  `;
+
+  const countResult = await query(
+    `
+      ${rankedBaseSql}
+      SELECT COUNT(*)::int AS total
+      FROM dedup
+      ${whereSql}
+    `,
+    params,
+  );
+
+  const total = countResult.rows[0]?.total || 0;
+  const totalPages = total === 0 ? 0 : Math.ceil(total / pagination.limit);
+
+  const dataParams = [...params, pagination.limit, pagination.offset];
+
+  const rowsResult = await query(
+    `
+      ${rankedBaseSql}
+      SELECT
+        user_id,
+        full_name,
+        email,
+        phone,
+        plan_name,
+        reason,
+        preapproval_plan_id,
+        subscription_id,
+        status,
+        provider_status,
+        transaction_amount,
+        currency_id
+      FROM dedup
+      ${whereSql}
+      ORDER BY full_name ASC NULLS LAST, email ASC NULLS LAST
+      LIMIT $${params.length + 1}
+      OFFSET $${params.length + 2}
+    `,
+    dataParams,
+  );
+
+  return {
+    subscribers: rowsResult.rows.map(mapSubscriberContract),
+    pagination: {
+      page: pagination.page,
+      limit: pagination.limit,
+      total,
+      total_pages: totalPages,
+    },
+  };
+}
+
+export async function getCurrentSubscriptionByUser({ userId }) {
+  const normalizedStatusSql = buildNormalizedSubscriptionStatusSql('status');
+
+  const currentResult = await query(
+    `
+      SELECT
+        id,
+        user_id,
+        payer_email,
+        mp_preapproval_id,
+        mp_plan_id,
+        external_reference,
+        reason,
+        status,
+        provider_status,
+        next_payment_date,
+        back_url,
+        card_token_last4,
+        created_at,
+        updated_at
+      FROM subscriptions
+      WHERE user_id = $1
+      ORDER BY
+        CASE
+          WHEN (${normalizedStatusSql}) = 'authorized' THEN 1
+          WHEN (${normalizedStatusSql}) = 'pending' THEN 2
+          WHEN (${normalizedStatusSql}) = 'paused' THEN 3
+          WHEN (${normalizedStatusSql}) = 'canceled' THEN 4
+          ELSE 5
+        END,
+        updated_at DESC,
+        created_at DESC
+      LIMIT 1
+    `,
+    [userId],
+  );
+
+  if (currentResult.rowCount === 0) {
+    return null;
+  }
+
+  const subscription = currentResult.rows[0];
+  const plan = await getPlanByMpId(subscription.mp_plan_id);
+  const attempts = await listSubscriptionAttempts(subscription.id);
+  const providerEvents = await listSubscriptionProviderEvents(subscription.id);
+
+  return mapSubscriptionContract({
+    subscription,
+    plan,
+    attempts,
+    providerEvents,
+  });
 }
 
 function isValidEmail(email) {
@@ -1090,7 +1354,7 @@ function mapSubscriptionContract({ subscription, plan, attempts, providerEvents 
     id: subscription.id,
     mp_preapproval_id: subscription.mp_preapproval_id,
     preapproval_plan_id: subscription.mp_plan_id || null,
-    status: normalizeSubscriptionStatus(subscription.status),
+    status: mapSubscriptionStatusForFrontend(subscription.status || subscription.provider_status),
     provider_status: subscription.provider_status || null,
     next_payment_date: subscription.next_payment_date || null,
     reason: subscription.reason || plan?.reason || null,

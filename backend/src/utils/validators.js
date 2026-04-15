@@ -154,6 +154,12 @@ export function validateAppointmentStatus(status) {
   }
 }
 
+export function validateAppointmentPaymentMethod(paymentMethod) {
+  if (!['manual', 'pix', 'point_card', 'assinante_premium'].includes(paymentMethod)) {
+    throw new AppError('payment_method invalido', 422, 'VALIDATION_ERROR');
+  }
+}
+
 export function validateServiceType(serviceType) {
   assertValidServiceType(serviceType);
 }

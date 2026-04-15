@@ -580,7 +580,7 @@ export async function listSlotsByDate(appointmentDate, barberId) {
   };
 }
 
-export async function createAppointment({ userId, appointmentDate, appointmentTime, serviceType, barberId }) {
+export async function createAppointment({ userId, appointmentDate, appointmentTime, serviceType, barberId, paymentMethod }) {
   await runRollingScheduleMaintenance();
   await assertActiveBarberExists(barberId);
 
@@ -624,24 +624,54 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
       return bookingValidation.existingAppointment;
     }
 
-    const legacyReusableSlot = await client.query(
-      `
-        UPDATE appointments
-        SET user_id = $1,
-            service_type = $4,
-            status = 'agendado',
-            price = $5,
-            barber_id = $6,
-            updated_at = NOW()
-        WHERE appointment_date = $2
-          AND appointment_time = $3
-          AND (barber_id = $6 OR barber_id IS NULL)
-          AND status = 'disponivel'
-          AND user_id IS NULL
-        RETURNING id, user_id, barber_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
-      `,
-      [userId, appointmentDate, normalizedTime, normalizedServiceType, pricing.finalPrice, barberId],
-    );
+    const normalizedPaymentMethod = String(paymentMethod || 'manual').trim().toLowerCase();
+
+    let legacyReusableSlot;
+
+    try {
+      legacyReusableSlot = await client.query(
+        `
+          UPDATE appointments
+          SET user_id = $1,
+              service_type = $4,
+              status = 'agendado',
+              price = $5,
+              barber_id = $6,
+              payment_method = $7,
+              updated_at = NOW()
+          WHERE appointment_date = $2
+            AND appointment_time = $3
+            AND (barber_id = $6 OR barber_id IS NULL)
+            AND status = 'disponivel'
+            AND user_id IS NULL
+          RETURNING id, user_id, barber_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
+        `,
+        [userId, appointmentDate, normalizedTime, normalizedServiceType, pricing.finalPrice, barberId, normalizedPaymentMethod],
+      );
+    } catch (error) {
+      if (error.code !== '42703') {
+        throw error;
+      }
+
+      legacyReusableSlot = await client.query(
+        `
+          UPDATE appointments
+          SET user_id = $1,
+              service_type = $4,
+              status = 'agendado',
+              price = $5,
+              barber_id = $6,
+              updated_at = NOW()
+          WHERE appointment_date = $2
+            AND appointment_time = $3
+            AND (barber_id = $6 OR barber_id IS NULL)
+            AND status = 'disponivel'
+            AND user_id IS NULL
+          RETURNING id, user_id, barber_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
+        `,
+        [userId, appointmentDate, normalizedTime, normalizedServiceType, pricing.finalPrice, barberId],
+      );
+    }
 
     if (legacyReusableSlot.rowCount > 0) {
       await client.query(
@@ -669,14 +699,40 @@ export async function createAppointment({ userId, appointmentDate, appointmentTi
       };
     }
 
-    const result = await client.query(
-      `
-        INSERT INTO appointments (user_id, barber_id, appointment_date, appointment_time, service_type, status, price)
-        VALUES ($1, $2, $3, $4, $5, 'agendado', $6)
-        RETURNING id, user_id, barber_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
-      `,
-      [userId, barberId, appointmentDate, normalizedTime, normalizedServiceType, pricing.finalPrice],
-    );
+    let result;
+
+    try {
+      result = await client.query(
+        `
+          INSERT INTO appointments (
+            user_id,
+            barber_id,
+            appointment_date,
+            appointment_time,
+            service_type,
+            status,
+            price,
+            payment_method
+          )
+          VALUES ($1, $2, $3, $4, $5, 'agendado', $6, $7)
+          RETURNING id, user_id, barber_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
+        `,
+        [userId, barberId, appointmentDate, normalizedTime, normalizedServiceType, pricing.finalPrice, normalizedPaymentMethod],
+      );
+    } catch (error) {
+      if (error.code !== '42703') {
+        throw error;
+      }
+
+      result = await client.query(
+        `
+          INSERT INTO appointments (user_id, barber_id, appointment_date, appointment_time, service_type, status, price)
+          VALUES ($1, $2, $3, $4, $5, 'agendado', $6)
+          RETURNING id, user_id, barber_id, appointment_date, appointment_time, service_type, status, price, created_at, updated_at
+        `,
+        [userId, barberId, appointmentDate, normalizedTime, normalizedServiceType, pricing.finalPrice],
+      );
+    }
 
     await client.query(
       `

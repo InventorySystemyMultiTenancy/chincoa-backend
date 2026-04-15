@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import {
   getAdminSubscriptionPlans,
+  getMySubscription,
   getPublicSubscriptionPlans,
   getSubscription,
   getStatus,
@@ -49,6 +50,7 @@ router.get('/subscriptions/plans', requireAuth, requireAdmin, getAdminSubscripti
 router.post('/subscriptions/plans', requireAuth, requireAdmin, postCreateSubscriptionPlan);
 router.patch('/subscriptions/plans/:reference', requireAuth, requireAdmin, patchAdminSubscriptionPlan);
 router.post('/subscriptions', requireAuth, postCreateSubscription);
+router.get('/subscriptions/me', requireAuth, getMySubscription);
 router.get('/subscriptions/:reference', requireAuth, getSubscription);
 router.post('/subscriptions/:reference/cancel', requireAuth, postCancelSubscription);
 router.delete('/subscriptions/:reference/cancel', requireAuth, postCancelSubscription);

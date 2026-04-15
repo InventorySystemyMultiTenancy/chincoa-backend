@@ -8,6 +8,7 @@ import { sendSuccess } from '../utils/apiResponse.js';
 import {
   requireFields,
   validateDate,
+  validateAppointmentPaymentMethod,
   validateServiceType,
   validateTime,
   validateUuid,
@@ -45,6 +46,7 @@ export async function createMyAppointment(req, res, next) {
     const appointmentTimeRaw = req.body.appointment_time ?? req.body.appointmentTime;
     const serviceTypeRaw = req.body.service_type ?? req.body.serviceType;
     const barberIdRaw = req.body.barber_id ?? req.body.barberId;
+    const paymentMethodRaw = req.body.payment_method ?? req.body.paymentMethod;
 
     if (!appointmentDateRaw || !appointmentTimeRaw || !serviceTypeRaw || !barberIdRaw) {
       requireFields(
@@ -62,11 +64,16 @@ export async function createMyAppointment(req, res, next) {
     const appointmentTime = String(appointmentTimeRaw).trim();
     const serviceType = normalizeServiceType(serviceTypeRaw);
     const barberId = String(barberIdRaw).trim();
+    const paymentMethod = paymentMethodRaw ? String(paymentMethodRaw).trim() : null;
 
     validateDate(appointmentDate);
     validateTime(appointmentTime);
     validateServiceType(serviceType);
     validateUuid(barberId, 'barber_id');
+
+    if (paymentMethod) {
+      validateAppointmentPaymentMethod(paymentMethod);
+    }
 
     const appointment = await createAppointment({
       userId: req.user.id,
@@ -74,6 +81,7 @@ export async function createMyAppointment(req, res, next) {
       appointmentTime,
       serviceType,
       barberId,
+      paymentMethod,
     });
 
     return sendSuccess(res, 201, { appointment });

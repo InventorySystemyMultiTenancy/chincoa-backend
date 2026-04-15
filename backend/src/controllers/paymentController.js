@@ -6,6 +6,7 @@ import {
   createSubscriptionPlan,
   createPixPayment,
   createPointPayment,
+  getCurrentSubscriptionByUser,
   getSubscriptionStatus,
   listAdminSubscriptionPlans,
   listPublicSubscriptionPlans,
@@ -348,6 +349,18 @@ export async function postCancelSubscription(req, res, next) {
     });
 
     return sendSuccess(res, 200, result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getMySubscription(req, res, next) {
+  try {
+    const subscription = await getCurrentSubscriptionByUser({ userId: req.user.id });
+
+    return sendSuccess(res, 200, {
+      subscription,
+    });
   } catch (error) {
     return next(error);
   }
