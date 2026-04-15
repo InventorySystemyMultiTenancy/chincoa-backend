@@ -215,11 +215,11 @@ export async function listAdminSubscribers({ status, includeInactive, search, pa
 
   if (statusFilter && statusFilter !== 'all') {
     params.push(statusFilter);
-    whereClauses.push(`(${normalizedStatusSql}) = $${params.length}`);
+    whereClauses.push(`status = $${params.length}`);
   } else if (statusFilter === 'all' && !includeInactiveFilter) {
-    whereClauses.push(`(${normalizedStatusSql}) IN ('authorized', 'pending')`);
+    whereClauses.push("status IN ('authorized', 'pending')");
   } else if (!statusFilter) {
-    whereClauses.push(`(${normalizedStatusSql}) IN ('authorized', 'pending')`);
+    whereClauses.push("status IN ('authorized', 'pending')");
   }
 
   const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
