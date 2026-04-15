@@ -265,93 +265,231 @@ export async function listAdminSubscribers({ status, includeInactive, search, pa
     )
   `;
 
-  const countResult = await query(
-    `
-      ${rankedBaseSql}
-      SELECT COUNT(*)::int AS total
-      FROM dedup
-      ${whereSql}
-    `,
-    params,
-  );
+  try {
+    const countResult = await query(
+      `
+        ${rankedBaseSql}
+        SELECT COUNT(*)::int AS total
+        FROM dedup
+        ${whereSql}
+      `,
+      params,
+    );
 
-  const total = countResult.rows[0]?.total || 0;
-  const totalPages = total === 0 ? 0 : Math.ceil(total / pagination.limit);
+    const total = countResult.rows[0]?.total || 0;
+    const totalPages = total === 0 ? 0 : Math.ceil(total / pagination.limit);
 
-  const dataParams = [...params, pagination.limit, pagination.offset];
+    const dataParams = [...params, pagination.limit, pagination.offset];
 
-  const rowsResult = await query(
-    `
-      ${rankedBaseSql}
-      SELECT
-        user_id,
-        full_name,
-        email,
-        phone,
-        plan_name,
-        reason,
-        preapproval_plan_id,
-        subscription_id,
-        status,
-        provider_status,
-        transaction_amount,
-        currency_id
-      FROM dedup
-      ${whereSql}
-      ORDER BY full_name ASC NULLS LAST, email ASC NULLS LAST
-      LIMIT $${params.length + 1}
-      OFFSET $${params.length + 2}
-    `,
-    dataParams,
-  );
+    const rowsResult = await query(
+      `
+        ${rankedBaseSql}
+        SELECT
+          user_id,
+          full_name,
+          email,
+          phone,
+          plan_name,
+          reason,
+          preapproval_plan_id,
+          subscription_id,
+          status,
+          provider_status,
+          transaction_amount,
+          currency_id
+        FROM dedup
+        ${whereSql}
+        ORDER BY full_name ASC NULLS LAST, email ASC NULLS LAST
+        LIMIT $${params.length + 1}
+        OFFSET $${params.length + 2}
+      `,
+      dataParams,
+    );
 
-  return {
-    subscribers: rowsResult.rows.map(mapSubscriberContract),
-    pagination: {
-      page: pagination.page,
-      limit: pagination.limit,
-      total,
-      total_pages: totalPages,
-    },
-  };
+    return {
+      subscribers: rowsResult.rows.map(mapSubscriberContract),
+      pagination: {
+        page: pagination.page,
+        limit: pagination.limit,
+        total,
+        total_pages: totalPages,
+      },
+    };
+  } catch (error) {
+    if (error.code !== '42703') {
+      throw error;
+    }
+
+    const legacyRankedBaseSql = `
+      WITH ranked AS (
+        SELECT
+          s.user_id,
+          u.full_name,
+          u.email,
+          u.phone,
+          s.payer_email,
+          COALESCE(p.name, s.reason) AS plan_name,
+          s.reason,
+          COALESCE(s.preapproval_plan_id, p.preapproval_plan_id) AS preapproval_plan_id,
+          s.mp_preapproval_id AS subscription_id,
+          ${normalizedStatusSql} AS status,
+          s.provider_status,
+          COALESCE(p.transaction_amount, NULL) AS transaction_amount,
+          COALESCE(p.currency_id, 'BRL') AS currency_id,
+          ROW_NUMBER() OVER (
+            PARTITION BY s.user_id
+            ORDER BY
+              CASE
+                WHEN (${normalizedStatusSql}) = 'authorized' THEN 1
+                WHEN (${normalizedStatusSql}) = 'pending' THEN 2
+                WHEN (${normalizedStatusSql}) = 'paused' THEN 3
+                WHEN (${normalizedStatusSql}) = 'canceled' THEN 4
+                ELSE 5
+              END,
+              s.updated_at DESC,
+              s.created_at DESC
+          ) AS rn
+        FROM subscriptions s
+        LEFT JOIN users u ON u.id = s.user_id
+        LEFT JOIN subscription_plans p ON p.preapproval_plan_id = s.preapproval_plan_id
+        WHERE s.user_id IS NOT NULL
+      ),
+      dedup AS (
+        SELECT *
+        FROM ranked
+        WHERE rn = 1
+      )
+    `;
+
+    const countResult = await query(
+      `
+        ${legacyRankedBaseSql}
+        SELECT COUNT(*)::int AS total
+        FROM dedup
+        ${whereSql}
+      `,
+      params,
+    );
+
+    const total = countResult.rows[0]?.total || 0;
+    const totalPages = total === 0 ? 0 : Math.ceil(total / pagination.limit);
+    const dataParams = [...params, pagination.limit, pagination.offset];
+
+    const rowsResult = await query(
+      `
+        ${legacyRankedBaseSql}
+        SELECT
+          user_id,
+          full_name,
+          email,
+          phone,
+          plan_name,
+          reason,
+          preapproval_plan_id,
+          subscription_id,
+          status,
+          provider_status,
+          transaction_amount,
+          currency_id
+        FROM dedup
+        ${whereSql}
+        ORDER BY full_name ASC NULLS LAST, email ASC NULLS LAST
+        LIMIT $${params.length + 1}
+        OFFSET $${params.length + 2}
+      `,
+      dataParams,
+    );
+
+    return {
+      subscribers: rowsResult.rows.map(mapSubscriberContract),
+      pagination: {
+        page: pagination.page,
+        limit: pagination.limit,
+        total,
+        total_pages: totalPages,
+      },
+    };
+  }
 }
 
 export async function getCurrentSubscriptionByUser({ userId }) {
   const normalizedStatusSql = buildNormalizedSubscriptionStatusSql('status');
 
-  const currentResult = await query(
-    `
-      SELECT
-        id,
-        user_id,
-        payer_email,
-        mp_preapproval_id,
-        mp_plan_id,
-        external_reference,
-        reason,
-        status,
-        provider_status,
-        next_payment_date,
-        back_url,
-        card_token_last4,
-        created_at,
-        updated_at
-      FROM subscriptions
-      WHERE user_id = $1
-      ORDER BY
-        CASE
-          WHEN (${normalizedStatusSql}) = 'authorized' THEN 1
-          WHEN (${normalizedStatusSql}) = 'pending' THEN 2
-          WHEN (${normalizedStatusSql}) = 'paused' THEN 3
-          WHEN (${normalizedStatusSql}) = 'canceled' THEN 4
-          ELSE 5
-        END,
-        updated_at DESC,
-        created_at DESC
-      LIMIT 1
-    `,
-    [userId],
-  );
+  let currentResult;
+
+  try {
+    currentResult = await query(
+      `
+        SELECT
+          id,
+          user_id,
+          payer_email,
+          mp_preapproval_id,
+          mp_plan_id,
+          external_reference,
+          reason,
+          status,
+          provider_status,
+          next_payment_date,
+          back_url,
+          card_token_last4,
+          created_at,
+          updated_at
+        FROM subscriptions
+        WHERE user_id = $1
+        ORDER BY
+          CASE
+            WHEN (${normalizedStatusSql}) = 'authorized' THEN 1
+            WHEN (${normalizedStatusSql}) = 'pending' THEN 2
+            WHEN (${normalizedStatusSql}) = 'paused' THEN 3
+            WHEN (${normalizedStatusSql}) = 'canceled' THEN 4
+            ELSE 5
+          END,
+          updated_at DESC,
+          created_at DESC
+        LIMIT 1
+      `,
+      [userId],
+    );
+  } catch (error) {
+    if (error.code !== '42703') {
+      throw error;
+    }
+
+    currentResult = await query(
+      `
+        SELECT
+          id,
+          user_id,
+          payer_email,
+          mp_preapproval_id,
+          preapproval_plan_id AS mp_plan_id,
+          external_reference,
+          reason,
+          status,
+          provider_status,
+          next_payment_date,
+          back_url,
+          card_token_last4,
+          created_at,
+          updated_at
+        FROM subscriptions
+        WHERE user_id = $1
+        ORDER BY
+          CASE
+            WHEN (${normalizedStatusSql}) = 'authorized' THEN 1
+            WHEN (${normalizedStatusSql}) = 'pending' THEN 2
+            WHEN (${normalizedStatusSql}) = 'paused' THEN 3
+            WHEN (${normalizedStatusSql}) = 'canceled' THEN 4
+            ELSE 5
+          END,
+          updated_at DESC,
+          created_at DESC
+        LIMIT 1
+      `,
+      [userId],
+    );
+  }
 
   if (currentResult.rowCount === 0) {
     return null;
@@ -1235,24 +1373,49 @@ async function getPlanByMpId(mpPlanId) {
     return null;
   }
 
-  const result = await query(
-    `
-      SELECT
-        mp_plan_id,
-        reason,
-        frequency,
-        frequency_type,
-        transaction_amount,
-        currency_id,
-        back_url
-      FROM subscription_plans
-      WHERE mp_plan_id = $1
-      LIMIT 1
-    `,
-    [mpPlanId],
-  );
+  try {
+    const result = await query(
+      `
+        SELECT
+          mp_plan_id,
+          reason,
+          frequency,
+          frequency_type,
+          transaction_amount,
+          currency_id,
+          back_url
+        FROM subscription_plans
+        WHERE mp_plan_id = $1
+        LIMIT 1
+      `,
+      [mpPlanId],
+    );
 
-  return result.rowCount > 0 ? result.rows[0] : null;
+    return result.rowCount > 0 ? result.rows[0] : null;
+  } catch (error) {
+    if (error.code !== '42703') {
+      throw error;
+    }
+
+    const legacyResult = await query(
+      `
+        SELECT
+          preapproval_plan_id AS mp_plan_id,
+          reason,
+          frequency,
+          frequency_type,
+          transaction_amount,
+          currency_id,
+          back_url
+        FROM subscription_plans
+        WHERE preapproval_plan_id = $1
+        LIMIT 1
+      `,
+      [mpPlanId],
+    );
+
+    return legacyResult.rowCount > 0 ? legacyResult.rows[0] : null;
+  }
 }
 
 async function createSubscriptionAttempt({ subscriptionId, status, providerStatus, message, amount }) {
