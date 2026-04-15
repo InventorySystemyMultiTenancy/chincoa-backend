@@ -285,11 +285,11 @@ if (!hasDatabase) {
 
       assert.equal(response.status, 200);
       assert.equal(response.body.success, true);
-      assert.equal(response.body.data.subscription.mp_preapproval_id, 'sub_authorized_older');
-      assert.equal(response.body.data.subscription.status, 'authorized');
-      assert.equal(response.body.data.subscription.is_active, true);
-      assert.equal(response.body.data.subscription.is_canceled, false);
-      assert.equal(response.body.data.subscription.subscription_state, 'ativa');
+      assert.equal(response.body.data.subscription.mp_preapproval_id, 'sub_canceled_newer');
+      assert.equal(response.body.data.subscription.status, 'canceled');
+      assert.equal(response.body.data.subscription.is_active, false);
+      assert.equal(response.body.data.subscription.is_canceled, true);
+      assert.equal(response.body.data.subscription.subscription_state, 'cancelada');
       assert.equal(response.body.data.subscription.preapproval_plan_id, 'plan_monthly');
       assert.equal(response.body.data.subscription.transaction_amount, 29.9);
       assert.deepEqual(response.body.data.subscription.attempts, []);

@@ -275,13 +275,6 @@ export async function listAdminSubscribers({ status, includeInactive, search, pa
         ROW_NUMBER() OVER (
           PARTITION BY s.user_id
           ORDER BY
-            CASE
-              WHEN (${normalizedStatusSql}) = 'authorized' THEN 1
-              WHEN (${normalizedStatusSql}) = 'pending' THEN 2
-              WHEN (${normalizedStatusSql}) = 'paused' THEN 3
-              WHEN (${normalizedStatusSql}) = 'canceled' THEN 4
-              ELSE 5
-            END,
             s.updated_at DESC,
             s.created_at DESC
         ) AS rn
@@ -371,13 +364,6 @@ export async function listAdminSubscribers({ status, includeInactive, search, pa
           ROW_NUMBER() OVER (
             PARTITION BY s.user_id
             ORDER BY
-              CASE
-                WHEN (${normalizedStatusSql}) = 'authorized' THEN 1
-                WHEN (${normalizedStatusSql}) = 'pending' THEN 2
-                WHEN (${normalizedStatusSql}) = 'paused' THEN 3
-                WHEN (${normalizedStatusSql}) = 'canceled' THEN 4
-                ELSE 5
-              END,
               s.updated_at DESC,
               s.created_at DESC
           ) AS rn
@@ -445,8 +431,6 @@ export async function listAdminSubscribers({ status, includeInactive, search, pa
 }
 
 export async function getCurrentSubscriptionByUser({ userId }) {
-  const normalizedStatusSql = buildNormalizedSubscriptionStatusSql('status');
-
   let currentResult;
 
   try {
@@ -470,13 +454,6 @@ export async function getCurrentSubscriptionByUser({ userId }) {
         FROM subscriptions
         WHERE user_id = $1
         ORDER BY
-          CASE
-            WHEN (${normalizedStatusSql}) = 'authorized' THEN 1
-            WHEN (${normalizedStatusSql}) = 'pending' THEN 2
-            WHEN (${normalizedStatusSql}) = 'paused' THEN 3
-            WHEN (${normalizedStatusSql}) = 'canceled' THEN 4
-            ELSE 5
-          END,
           updated_at DESC,
           created_at DESC
         LIMIT 1
@@ -508,13 +485,6 @@ export async function getCurrentSubscriptionByUser({ userId }) {
         FROM subscriptions
         WHERE user_id = $1
         ORDER BY
-          CASE
-            WHEN (${normalizedStatusSql}) = 'authorized' THEN 1
-            WHEN (${normalizedStatusSql}) = 'pending' THEN 2
-            WHEN (${normalizedStatusSql}) = 'paused' THEN 3
-            WHEN (${normalizedStatusSql}) = 'canceled' THEN 4
-            ELSE 5
-          END,
           updated_at DESC,
           created_at DESC
         LIMIT 1
