@@ -110,6 +110,32 @@ export function mapSubscriptionStatusForFrontend(rawStatus) {
   return normalizeSubscriptionStatus(rawStatus, 'unknown');
 }
 
+function getSubscriptionActivityFlags(rawStatus) {
+  const normalizedStatus = mapSubscriptionStatusForFrontend(rawStatus);
+
+  if (normalizedStatus === 'canceled') {
+    return {
+      is_active: false,
+      is_canceled: true,
+      subscription_state: 'cancelada',
+    };
+  }
+
+  if (['authorized', 'pending', 'paused'].includes(normalizedStatus)) {
+    return {
+      is_active: true,
+      is_canceled: false,
+      subscription_state: 'ativa',
+    };
+  }
+
+  return {
+    is_active: false,
+    is_canceled: false,
+    subscription_state: 'desconhecida',
+  };
+}
+
 function parseBooleanQuery(value, defaultValue = false) {
   if (value === undefined || value === null || String(value).trim() === '') {
     return defaultValue;
@@ -178,6 +204,9 @@ function buildNormalizedSubscriptionStatusSql(columnRef) {
 }
 
 function mapSubscriberContract(row) {
+  const normalizedStatus = mapSubscriptionStatusForFrontend(row.status || row.provider_status);
+  const activityFlags = getSubscriptionActivityFlags(normalizedStatus);
+
   return {
     user_id: row.user_id,
     full_name: row.full_name || null,
@@ -186,7 +215,10 @@ function mapSubscriberContract(row) {
     plan_name: row.plan_name || row.reason || null,
     preapproval_plan_id: row.preapproval_plan_id || null,
     subscription_id: row.subscription_id || null,
-    status: mapSubscriptionStatusForFrontend(row.status || row.provider_status),
+    status: normalizedStatus,
+    is_active: activityFlags.is_active,
+    is_canceled: activityFlags.is_canceled,
+    subscription_state: activityFlags.subscription_state,
     transaction_amount: row.transaction_amount === null ? null : Number(row.transaction_amount),
     currency_id: row.currency_id || null,
   };
@@ -1513,11 +1545,17 @@ async function listSubscriptionProviderEvents(subscriptionId) {
 }
 
 function mapSubscriptionContract({ subscription, plan, attempts, providerEvents }) {
+  const normalizedStatus = mapSubscriptionStatusForFrontend(subscription.status || subscription.provider_status);
+  const activityFlags = getSubscriptionActivityFlags(normalizedStatus);
+
   return {
     id: subscription.id,
     mp_preapproval_id: subscription.mp_preapproval_id,
     preapproval_plan_id: subscription.mp_plan_id || null,
-    status: mapSubscriptionStatusForFrontend(subscription.status || subscription.provider_status),
+    status: normalizedStatus,
+    is_active: activityFlags.is_active,
+    is_canceled: activityFlags.is_canceled,
+    subscription_state: activityFlags.subscription_state,
     provider_status: subscription.provider_status || null,
     next_payment_date: subscription.next_payment_date || null,
     reason: subscription.reason || plan?.reason || null,

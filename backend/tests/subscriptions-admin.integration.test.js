@@ -173,6 +173,9 @@ if (!hasDatabase) {
       assert.equal(response.body.data.subscribers.length, 1);
       assert.equal(response.body.data.subscribers[0].email, 'client@integration.test');
       assert.equal(response.body.data.subscribers[0].status, 'pending');
+      assert.equal(response.body.data.subscribers[0].is_active, true);
+      assert.equal(response.body.data.subscribers[0].is_canceled, false);
+      assert.equal(response.body.data.subscribers[0].subscription_state, 'ativa');
       assert.equal(response.body.data.subscribers[0].plan_name, 'Plano Mensal');
       assert.equal(response.body.data.pagination.page, 1);
       assert.equal(response.body.data.pagination.limit, 50);
@@ -284,6 +287,9 @@ if (!hasDatabase) {
       assert.equal(response.body.success, true);
       assert.equal(response.body.data.subscription.mp_preapproval_id, 'sub_authorized_older');
       assert.equal(response.body.data.subscription.status, 'authorized');
+      assert.equal(response.body.data.subscription.is_active, true);
+      assert.equal(response.body.data.subscription.is_canceled, false);
+      assert.equal(response.body.data.subscription.subscription_state, 'ativa');
       assert.equal(response.body.data.subscription.preapproval_plan_id, 'plan_monthly');
       assert.equal(response.body.data.subscription.transaction_amount, 29.9);
       assert.deepEqual(response.body.data.subscription.attempts, []);
